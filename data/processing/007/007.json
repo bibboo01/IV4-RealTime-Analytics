@@ -1,0 +1,10 @@
+{
+    "inspection_id": "007",
+    "image": "D:\\iv4-data-agent\\data\\processing\\007\\007.jpg",
+    "text_files": [
+        "D:\\iv4-data-agent\\data\\processing\\007\\007.txt",
+        "D:\\iv4-data-agent\\data\\processing\\007\\007_result.txt"
+    ],
+    "status": "COMPLETE",
+    "created_at": "2026-09-28T08:39:58.487979+00:00"
+}
