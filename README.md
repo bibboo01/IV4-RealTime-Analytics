@@ -1,9 +1,3 @@
-ได้ครับ ด้านล่างคือ **README.md ฉบับเต็มแบบ Copy ได้ทั้งหมด** สามารถคัดลอกไปวางใน:
-
-```text
-D:\iv4-data-agent\README.md
-```
-
 ````markdown
 # IV4 Data Agent
 
