@@ -1,9 +1,8 @@
-````markdown
 # IV4 Data Agent
 
 ระบบสำหรับรับข้อมูล Inspection จาก **KEYENCE IV4 G500CA** แบบอัตโนมัติ โดยรับไฟล์จาก Sensor ได้แก่ Image (`JPG/JPEG`) และข้อมูลผลการตรวจสอบ (`TXT`) จากนั้นทำการจับคู่ข้อมูล, Parse ข้อมูล, วิเคราะห์ผล และบันทึกลงฐานข้อมูล
 
-> **Current Status:** Core Realtime Pipeline ผ่าน End-to-End Test แล้ว  
+> **Current Status:** Core Realtime Pipeline พร้อม Production (hardened, 28 automated tests) — รอทดสอบกับข้อมูลจริงจาก IV4  
 > **Google Drive Integration:** ยังไม่เปิดใช้งาน
 
 ---
@@ -98,7 +97,7 @@ IV4 Data Agent เป็นระบบสำหรับรับและป�
                     │      Database       │
                     │       SQLite        │
                     └─────────────────────┘
-````
+```
 
 ---
 
@@ -153,14 +152,18 @@ iv4-data-agent/
 │
 ├── app/
 │   ├── __init__.py
+│   ├── __main__.py          # python -m app
+│   ├── config.py            # settings จาก .env / env vars
+│   ├── logging_setup.py     # rotating log
 │   ├── pipeline.py
 │   │
 │   ├── ingestion/
 │   │   ├── __init__.py
 │   │   ├── watcher.py
 │   │   ├── matcher.py
+│   │   ├── stability.py
 │   │   ├── lifecycle.py
-│   │   └── record.py
+│   │   └── record.py        # manifest.json + UID + content hash
 │   │
 │   ├── parser/
 │   │   ├── __init__.py
@@ -193,16 +196,26 @@ iv4-data-agent/
 │
 ├── logs/
 │
-├── tests/
-│   ├── test_txt_parser.py
-│   ├── test_inspection_record.py
-│   ├── test_analyzer.py
-│   ├── test_database.py
-│   └── test_pipeline.py
+├── deploy/
+│   ├── install_service.ps1
+│   ├── uninstall_service.ps1
+│   └── healthcheck.ps1
 │
-├── .env
+├── scripts/
+│   ├── backup_db.py
+│   └── stats.py
+│
+├── tests/
+│   ├── conftest.py
+│   ├── mock_data/
+│   ├── test_parsing.py
+│   ├── test_database.py
+│   └── test_agent.py
+│
+├── .env.example
 ├── .gitignore
 ├── requirements.txt
+├── requirements-dev.txt
 └── README.md
 ```
 
@@ -337,7 +350,7 @@ data/processing/
     ├── 001.jpg
     ├── 001.txt
     ├── 001_result.txt
-    └── 001.json
+    └── manifest.json        # ใช้ชื่อ folder = UID เช่น 001__20261003T074846246028
 ```
 
 ---
@@ -386,37 +399,25 @@ Inspection หนึ่งรายการสามารถประกอบ
 
 ---
 
-# 9. Inspection ID
+# 9. Inspection ID และ UID
 
-ระบบใช้ชื่อไฟล์ในการระบุ Inspection ID
-
-ตัวอย่าง:
+ระบบใช้ชื่อไฟล์ในการจัดกลุ่ม (Group ID) โดยตัด suffix `_result` ออก
 
 ```text
-001.jpg
-001.txt
-001_result.txt
+007.jpg / 007.txt / 007_result.txt          -> Group ID = 007
+CAM1_0001.jpg / CAM1_0001_result.txt        -> Group ID = CAM1_0001
 ```
 
-จะถูกจัดกลุ่มเป็น:
+> เดิมใช้ `stem.split("_")[0]` ซึ่งจะรวม Inspection ที่ต่างกันเข้าด้วยกันทันทีที่ชื่อไฟล์จริงมี `_`
+
+เนื่องจากตัวนับไฟล์ของ IV4 **อาจรีเซ็ตหรือวนซ้ำ** ได้ (ปิด-เปิดเครื่อง, counter เต็ม) ชื่อไฟล์จึงไม่ unique
+ทุก Inspection ที่รับเข้ามาจะได้ **UID** = Group ID + เวลาที่รับ (UTC):
 
 ```text
-Inspection ID = 001
+007__20261003T074846246028
 ```
 
-อีกตัวอย่าง:
-
-```text
-007.jpg
-007.txt
-007_result.txt
-```
-
-จะถูกจัดกลุ่มเป็น:
-
-```text
-Inspection ID = 007
-```
+UID ใช้เป็นชื่อ folder ใน `data/processing/` และเป็น key หลักใน Database
 
 ---
 
@@ -474,41 +475,22 @@ STATUS : COMPLETE
 
 ## 10.3 INVALID
 
-หากไม่พบ Image:
+ไฟล์เกินจำนวน (เช่น Image 2 ไฟล์, TXT ซ้ำ) หรือไม่มี TXT หลัก → ย้ายไป `data/error/<uid>/` พร้อม `ERROR.txt`
 
-```text
-Images : 0
-Texts  : 3
-STATUS : INVALID
-```
+## 10.4 INCOMPLETE (Timeout)
+
+ถ้ากลุ่มยังไม่ครบภายใน `IV4_GROUP_TIMEOUT` (default 120 วินาที) → ย้ายไป `data/error/` ไม่ค้างใน `incoming/` ตลอดไป
 
 ---
 
 # 11. File Stability Check
 
-เนื่องจาก IV4 อาจกำลังเขียนไฟล์อยู่ ระบบจะไม่ประมวลผลไฟล์ทันทีที่ตรวจพบ
+ไฟล์จะถูกประมวลผลเมื่อ **ขนาดและเวลาแก้ไขไม่เปลี่ยน** ต่อเนื่องอย่างน้อย `IV4_SETTLE_SECONDS` (default 1.5 วินาที)
 
-Watcher จะตรวจสอบขนาดไฟล์ซ้ำจนกว่าจะมั่นใจว่าไฟล์เขียนเสร็จ
+การตรวจทำแบบ non-blocking ในรอบ scan (ไม่ sleep ใน watchdog callback แบบเดิม) และ:
 
-Current Configuration:
-
-```text
-STABILITY_CHECK_INTERVAL = 0.5 seconds
-
-STABILITY_REQUIRED_CHECKS = 3
-
-STABILITY_TIMEOUT = 30 seconds
-```
-
-ตัวอย่าง:
-
-```text
-[CHECKING] name=007.jpg size=27999 bytes
-[CHECKING] name=007.jpg size=27999 bytes
-[CHECKING] name=007.jpg size=27999 bytes
-[CHECKING] name=007.jpg size=27999 bytes
-[READY] name=007.jpg size=27999 bytes
-```
+* ไฟล์ที่ยังถูก IV4/FTP เปิดอยู่ (Windows lock) จะถูก rollback แล้วลองใหม่รอบถัดไป
+* JPG ทุกไฟล์ถูกเปิดตรวจด้วย Pillow (`IV4_VERIFY_IMAGES`) เพื่อจับไฟล์ที่ส่งมาไม่ครบ
 
 ---
 
@@ -671,19 +653,13 @@ Database มีหน้าที่เก็บข้อมูล Inspection �
 
 # 19. Duplicate Protection
 
-ระบบใช้ `inspection_id` เป็นตัวระบุ Inspection
+| กรณี | ผลลัพธ์ |
+| --- | --- |
+| IV4 ส่ง `001` ซ้ำแต่เป็นชิ้นงานใหม่ (counter reset) | สร้าง record ใหม่ (UID ต่างกัน) — **ประวัติเดิมไม่ถูกเขียนทับ** |
+| ไฟล์ชุดเดิมเป๊ะถูก copy เข้ามาซ้ำ | ตรวจด้วย SHA-256 ของไฟล์ (`content_hash`) → `DUPLICATE` ย้ายไป `data/error/` |
+| Agent crash แล้วประมวลผล folder เดิมซ้ำ | Upsert ตาม UID → `UPDATED` ไม่เกิด record ซ้ำ |
 
-หากพบ Inspection ID เดิม ระบบจะ Update แทนการสร้าง Record ใหม่
-
-ตัวอย่าง:
-
-```text
-Inspection ID : 006
-Action        : UPDATED
-Database ID   : 1
-```
-
-ทำให้ข้อมูลไม่เกิด Duplicate
+> ระบบเดิม upsert ด้วย `inspection_id` ทำให้ข้อมูลเก่าถูกเขียนทับ และไฟล์ชุดที่สองค้างใน `incoming/` ตลอดไป
 
 ---
 
@@ -759,34 +735,34 @@ STATUS : COMPLETE
 
 # 22. Running the System
 
-Activate Virtual Environment:
-
 ```powershell
+python -m venv .venv
 .venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+copy .env.example .env          # ปรับ path / threshold
+python -m app                   # หรือ python -m app.ingestion.watcher
 ```
 
-จากนั้น Run Watcher:
-
-```powershell
-python -m app.ingestion.watcher
-```
+หยุดด้วย Ctrl+C (ปิดอย่างปลอดภัย)
 
 ---
 
-# 23. Watcher Startup
+# 23. Startup และ Recovery
 
-เมื่อระบบเริ่มทำงาน:
+เมื่อเริ่มทำงาน Agent จะ:
+
+1. Migrate Database เดิม (v1) อัตโนมัติ — ตารางเดิมถูกเก็บไว้เป็น `inspection_v1_<timestamp>`
+2. ประมวลผล folder ใน `data/processing/` ที่ค้างสถานะ `CLAIMED` (crash / DB ล่ม)
+3. Scan `data/incoming/` — ไฟล์ที่มาถึงตอน Agent ปิดอยู่จะถูกประมวลผล
+4. ใช้ watchdog event เพื่อปลุก scanner ทันที + scan ทุก `IV4_SCAN_INTERVAL` วินาที (กัน event หาย)
+
+Lifecycle ของแต่ละ Inspection ถูกบันทึกใน `data/processing/<uid>/manifest.json`
 
 ```text
-============================================================
-IV4 Data Agent
-============================================================
-Watching  : D:\iv4-data-agent\data\incoming
-Processing: D:\iv4-data-agent\data\processing
-Supported : JPG, JPEG, TXT
-Stability : 3 checks × 0.5s
-Press Ctrl+C to stop.
-============================================================
+incoming/ ──► processing/<uid>/ (CLAIMED) ──► DONE
+                                  │
+                                  ├─ DB error ──► retry ทุก 30s (สูงสุด 20 ครั้ง)
+                                  └─ parse / image / duplicate error ──► error/<uid>/ + ERROR.txt
 ```
 
 ---
@@ -842,131 +818,24 @@ DONE
 
 ---
 
-# 25. Test Environment
-
-Project ใช้ Python Virtual Environment:
-
-```text
-.venv/
-```
-
-Activate:
+# 25. Testing
 
 ```powershell
-.venv\Scripts\Activate.ps1
+python -m pip install -r requirements-dev.txt
+python -m pytest -q
 ```
+
+Test ทั้งหมดใช้ temp folder และ temp database — **ไม่แตะ `data/` จริง**
+
+| ไฟล์ | ครอบคลุม |
+| --- | --- |
+| `tests/test_parsing.py` | TXT parser (UTF-8/UTF-16/cp874), Inspection Record, Analyzer, Matcher |
+| `tests/test_database.py` | Create/Update, ID ซ้ำเก็บประวัติ, Duplicate hash, Migration จาก v1 |
+| `tests/test_agent.py` | End-to-end: ไฟล์ครบ/ไม่ครบ, counter reset, backlog ตอน startup, timeout, invalid, JPG เสีย, DB ล่มแล้ว retry, upload queue, watcher จริง 20 inspection |
 
 ---
 
-# 26. Install Dependencies
-
-ติดตั้ง Dependencies:
-
-```powershell
-python -m pip install -r requirements.txt
-```
-
-หรือ Update pip:
-
-```powershell
-python -m pip install --upgrade pip
-```
-
----
-
-# 27. Current Dependencies
-
-ปัจจุบันมี Dependency หลัก:
-
-```text
-watchdog==6.0.0
-```
-
-Dependency อื่น ๆ จะถูกเพิ่มตาม Component ที่พัฒนาเพิ่มเติม
-
----
-
-# 28. Testing
-
-## 28.1 TXT Parser Test
-
-```powershell
-python -m tests.test_txt_parser
-```
-
-ตรวจสอบ:
-
-* TXT parsing
-* Inspection ID
-* Timestamp
-* Machine ID
-* Camera ID
-* Result
-* Score
-* Width
-* Height
-* Defect Count
-* Inspection Time
-* Confidence
-
----
-
-## 28.2 Inspection Record Test
-
-```powershell
-python -m tests.test_inspection_record
-```
-
-ตรวจสอบการสร้าง Inspection Record
-
----
-
-## 28.3 Analysis Test
-
-```powershell
-python -m tests.test_analyzer
-```
-
-ตรวจสอบ Analysis Engine
-
----
-
-## 28.4 Database Test
-
-```powershell
-python -m tests.test_database
-```
-
-ตรวจสอบ:
-
-* Database Connection
-* Create
-* Update
-* Read
-* Duplicate Protection
-* Count
-
----
-
-## 28.5 Pipeline Test
-
-```powershell
-python -m tests.test_pipeline
-```
-
-ตรวจสอบ:
-
-```text
-Parser
-   ↓
-Analysis
-   ↓
-Database
-```
-
----
-
-# 29. End-to-End Test
+# 26. End-to-End Test
 
 สร้าง Mock Inspection:
 
@@ -990,7 +859,7 @@ python -m app.ingestion.watcher
 
 ---
 
-# 30. Mock Data Example
+# 27. Mock Data Example
 
 ## 007.txt
 
@@ -1020,7 +889,7 @@ confidence=0.978
 
 ---
 
-# 31. End-to-End Test Result
+# 28. End-to-End Test Result
 
 Mock Inspection `007` ผ่านการทดสอบแล้ว
 
@@ -1048,20 +917,22 @@ Pipeline      PASS
 
 # 32. Current System Status
 
-| Component            | Status     |
-| -------------------- | ---------- |
-| File Watcher         | PASS       |
-| File Stability Check | PASS       |
-| File Matcher         | PASS       |
-| TXT Parser           | PASS       |
-| Inspection Record    | PASS       |
-| Analysis Engine      | PASS       |
-| SQLite Database      | PASS       |
-| Duplicate Protection | PASS       |
-| Realtime Pipeline    | PASS       |
-| End-to-End Mock Test | PASS       |
-| Google Drive         | NOT ACTIVE |
-| Real IV4 Data        | PENDING    |
+| Component              | Status     |
+| ---------------------- | ---------- |
+| File Watcher + Scanner | PASS       |
+| File Stability Check   | PASS       |
+| File Matcher           | PASS       |
+| TXT Parser             | PASS       |
+| Inspection Record      | PASS       |
+| Analysis Engine        | PASS (mock rules) |
+| SQLite (WAL)           | PASS       |
+| Duplicate Protection   | PASS       |
+| Error Quarantine       | PASS       |
+| Crash Recovery         | PASS       |
+| Rotating Log + Health  | PASS       |
+| Windows Service script | READY      |
+| Google Drive           | NOT ACTIVE |
+| Real IV4 Data          | PENDING    |
 
 ---
 
@@ -1269,44 +1140,26 @@ Analysis Result
 
 # 38. Error Handling
 
-ระบบมีพื้นที่สำหรับจัดการข้อมูลที่ผิดปกติ:
+ทุกกรณีที่ประมวลผลไม่ได้จะถูกย้ายไป `data/error/<uid>/` พร้อม `ERROR.txt` (เวลา + เหตุผล) — **ไม่มีการลบไฟล์**
 
-```text
-data/error/
-```
-
-ตัวอย่าง Error:
-
-* File ไม่ครบ
-* File ไม่สามารถอ่านได้
-* TXT Format ไม่ถูกต้อง
-* Parser Error
-* Analysis Error
-* Database Error
-* File ไม่ Stable ภายใน Timeout
-* Invalid Inspection Group
+| เหตุ | การจัดการ |
+| --- | --- |
+| ไฟล์ไม่ครบภายใน timeout | error `INCOMPLETE` |
+| ไฟล์เกิน / ซ้ำ | error `INVALID group` |
+| JPG เสีย / ส่งไม่ครบ | error `IMAGE` |
+| TXT อ่านไม่ได้ | error `PARSER` |
+| ค่าตัวเลขผิดรูปแบบ | ไม่ fail — เก็บเป็น warning ใน `parse_warnings` และค่าดิบใน `raw_data` |
+| ไม่มี field `result` | `UNKNOWN` (ไม่ถือว่า PASS) |
+| Database lock / ล่ม | คงไว้ใน `processing/` แล้ว retry |
+| ไฟล์ชุดเดิมซ้ำ | error `DUPLICATE` |
 
 ---
 
-# 39. Logging
+# 39. Logging และ Health
 
-ระบบแสดงสถานะการทำงานผ่าน Console และเตรียม `logs/` สำหรับการพัฒนา Logging System
-
-ตัวอย่าง Log:
-
-```text
-[NEW FILE]
-[CHECKING]
-[READY]
-[MATCHER]
-[WAITING]
-[COMPLETE]
-[PARSER]
-[ANALYSIS]
-[DATABASE]
-[DONE]
-[ERROR]
-```
+* `logs/iv4_agent.log` — rotating log (10 MB × 10 ไฟล์) มี timestamp ทุกบรรทัด
+* `logs/health.json` — heartbeat ทุกรอบ scan: จำนวน processed / pass / fail / errors, ไฟล์ค้างใน incoming, error ล่าสุด
+* `deploy/healthcheck.ps1` — ตรวจ service, heartbeat, backlog, error ใหม่ → เขียน Windows Event Log เมื่อผิดปกติ
 
 ---
 
@@ -1333,53 +1186,10 @@ credentials/
 
 ---
 
-# 41. Recommended `.gitignore`
+# 41. `.gitignore`
 
-ตัวอย่าง:
-
-```gitignore
-# Python
-__pycache__/
-*.py[cod]
-*.pyo
-
-# Virtual Environment
-.venv/
-venv/
-
-# Environment
-.env
-.env.*
-
-# Credentials
-credentials/
-*.json
-
-# Database
-*.db
-*.sqlite
-*.sqlite3
-
-# Runtime data
-data/incoming/*
-data/processing/*
-data/uploaded/*
-data/error/*
-
-# Logs
-logs/*
-*.log
-
-# IDE
-.vscode/
-.idea/
-
-# OS
-.DS_Store
-Thumbs.db
-```
-
-> หากมีไฟล์ Mock Data ที่ต้องการเก็บใน Git ให้สร้าง folder แยก เช่น `tests/mock_data/`
+ใช้ `.gitignore` ใน repo — `data/`, `*.db`, `logs/`, `.env`, `credentials/` ไม่ถูก commit
+Mock data สำหรับ test อยู่ที่ `tests/mock_data/`
 
 ---
 
@@ -1558,68 +1368,45 @@ Realtime Monitoring และ Historical Analysis
 ## Phase 10 — Production Deployment
 
 ```text
-[PLANNED]
+[READY — รอติดตั้งบน Mini PC]
 ```
 
-* Windows Service
-* Auto Start
-* Health Check
-* Error Recovery
-* Log Rotation
-* Backup
-* Monitoring
-* Alerting
+* Windows Service (NSSM) + Auto Start + Auto Restart — `deploy/install_service.ps1`
+* Health Check + Windows Event Log — `deploy/healthcheck.ps1`
+* Error Recovery — manifest + retry + startup recovery
+* Log Rotation — `logs/iv4_agent.log`
+* Backup — `python -m scripts.backup_db --keep 30`
+* Summary — `python -m scripts.stats`
 
 ---
 
-# 44. Current Limitations
+# 44. Production Deployment Checklist (Mini PC)
 
-ปัจจุบันระบบยังอยู่ในช่วง Development / Prototype
-
-ข้อจำกัด:
-
-1. ยังไม่ได้ทดสอบกับข้อมูลจริงจาก IV4
-2. TXT Format จริงจาก IV4 ยังต้องตรวจสอบ
-3. Google Drive ยังไม่ได้เชื่อมต่อ
-4. Dashboard ยังไม่ได้สร้าง
-5. Data Analysis ขั้นสูงยังไม่ได้สร้าง
-6. Production Service ยังไม่ได้ตั้งค่า
-7. Error Recovery ยังอยู่ระหว่างพัฒนา
-8. Multi-camera ยังไม่ได้ทดสอบเต็มรูปแบบ
+1. ติดตั้ง Python 3.11+ และ [NSSM](https://nssm.cc)
+2. `python -m venv .venv` → `pip install -r requirements.txt`
+3. `copy .env.example .env` แล้วตั้ง `IV4_INCOMING_DIR` ให้ตรงกับ folder ที่ IV4/FTP เขียนไฟล์
+4. ถ้าเป็น network share ตั้ง `IV4_USE_POLLING=true`
+5. `python -m pytest -q` ต้องผ่านทั้งหมดบนเครื่องจริง
+6. ทดสอบมือ: `python -m app` แล้ววางไฟล์ตัวอย่างจาก `tests/mock_data/`
+7. Admin PowerShell: `.\deploy\install_service.ps1 -Nssm C:\tools\nssm\win64\nssm.exe`
+8. Task Scheduler:
+   * ทุก 5 นาที: `powershell -File deploy\healthcheck.ps1`
+   * ทุกวัน: `.venv\Scripts\python.exe -m scripts.backup_db --keep 30` (ควร copy `backups/` ออกนอกเครื่อง)
+9. ตั้ง Windows Update / Power plan ไม่ให้เครื่อง sleep และกำหนดเวลา restart นอกช่วงผลิต
+10. ตรวจพื้นที่ disk: รูปจาก IV4 สะสมใน `data/processing/` — ต้องมีนโยบาย archive/ลบ (ดูข้อ 45)
 
 ---
 
-# 45. Next Step
+# 45. Current Limitations / Next Step
 
-ลำดับงานที่แนะนำ:
+ต้องทำก่อนเปิดใช้งานจริงเต็มรูปแบบ:
 
-```text
-1. ได้ข้อมูลจริงจาก IV4
-        ↓
-2. ตรวจสอบ JPG
-        ↓
-3. ตรวจสอบ TXT
-        ↓
-4. ตรวจสอบ Result TXT
-        ↓
-5. ตรวจสอบ Filename Pattern
-        ↓
-6. ทดสอบ Realtime Ingestion
-        ↓
-7. ปรับ Parser ให้ตรงกับข้อมูลจริง
-        ↓
-8. ปรับ Analysis Rules
-        ↓
-9. เก็บข้อมูลจริงเข้า SQLite
-        ↓
-10. เริ่ม Data Analysis
-        ↓
-11. เชื่อม Online Storage
-        ↓
-12. Dashboard
-        ↓
-13. Production Deployment
-```
+1. **ข้อมูลจริงจาก IV4** — ยืนยันชื่อไฟล์, รูปแบบ TXT, encoding, จำนวนไฟล์ต่อ inspection, ความถี่ (ปรับได้ที่ `.env` + parser)
+2. **Analysis Rules จริง** — threshold ปัจจุบันเป็น mock (`IV4_SCORE_THRESHOLD=90`)
+3. **Retention** — ยังไม่มีการ archive/ลบรูปเก่า; ประเมินขนาดรูป × จำนวนต่อวัน แล้วกำหนดนโยบาย
+4. **Online Storage** — upload queue ถูกเตรียมไว้ (เฉพาะสถานะ DONE) แต่ยังไม่ผูกเข้ากับ service
+5. **Multi-camera** — ถ้า IV4 หลายตัวเขียนลง folder เดียวกันด้วยเลขเดียวกัน ต้องแยก folder หรือใส่ prefix กล้องในชื่อไฟล์
+6. Dashboard / Data Analysis
 
 ---
 
@@ -1679,8 +1466,3 @@ Database
 โดยผ่าน End-to-End Mock Test แล้ว
 
 ขั้นต่อไปคือการนำข้อมูลจริงจาก KEYENCE IV4 G500CA เข้ามาทดสอบ เพื่อยืนยันรูปแบบไฟล์และข้อมูลจริง ก่อนพัฒนา Data Analysis, Online Storage และ Dashboard ต่อไป
-
-```
-
-**หมายเหตุ:** ตอนนี้ README นี้ตั้งสถานะ **Google Drive = ยังไม่เปิดใช้งาน** ตามที่เราตกลงกัน และแยก `Online Storage` ออกจาก Core Pipeline ไว้ก่อน เพื่อให้ภายหลังจะใช้ Google Drive หรือ Cloud Storage ตัวอื่นก็ไม่ต้องรื้อระบบหลักครับ
-```

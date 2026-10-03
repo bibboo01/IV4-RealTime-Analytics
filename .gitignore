@@ -1,6 +1,35 @@
-.venv/
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+.pytest_cache/
+
+# Virtual Environment
+.venv/
+venv/
+
+# Environment / secrets
 .env
+.env.*
+!.env.example
+credentials/
+
+# Database
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Runtime data (keep the folders, not the content)
+data/
+backups/
+
+# Logs
 logs/
-credentials/*
+*.log
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

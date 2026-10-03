@@ -1,284 +1,362 @@
-from pathlib import Path
-import time
+"""
+IV4 Data Agent – realtime ingestion service.
+
+Design (production):
+  * watchdog events only *wake up* the scanner; the scanner is the source
+    of truth. Missed events (Windows buffer overflow, network share, agent
+    restart) are therefore harmless: the next scan picks the files up.
+  * Stability is tracked across scans (no sleeping inside callbacks).
+  * Each physical inspection gets a unique ``uid`` (filename id + arrival
+    time) so a reset IV4 counter never overwrites or blocks older data.
+  * Anything that cannot be processed is moved to data/error/<name>/ with
+    ERROR.txt – nothing is deleted, nothing gets stuck in incoming/.
+  * Database errors are retried (folder stays in processing/) instead of
+    quarantining good data.
+  * On start-up, half-processed folders in processing/ are recovered.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import signal
 import threading
+import time
+from pathlib import Path
 
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
+from watchdog.observers.polling import PollingObserver
 
-from app.ingestion.matcher import process_group
+from app.config import Settings, load_settings
+from app.database.repository import DatabaseRepository
+from app.ingestion.lifecycle import move_files, quarantine
+from app.ingestion.matcher import (
+    COMPLETE,
+    INVALID,
+    WAITING,
+    GroupStatus,
+    find_groups,
+    validate_group,
+)
+from app.ingestion.record import (
+    CLAIMED,
+    DONE,
+    FAILED,
+    content_hash,
+    create_manifest,
+    load_manifest,
+    make_uid,
+    save_manifest,
+    utc_now,
+)
+from app.ingestion.stability import StabilityTracker
+from app.pipeline import PipelineError, run_pipeline
 
-from app.pipeline import process_inspection
+log = logging.getLogger("iv4.agent")
 
-BASE_DIR = Path(__file__).resolve().parents[2]
-
-WATCH_FOLDER = BASE_DIR / "data" / "incoming"
-PROCESSING_FOLDER = BASE_DIR / "data" / "processing"
-
-SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".txt"}
-
-STABILITY_CHECK_INTERVAL = 0.5
-STABILITY_REQUIRED_CHECKS = 3
-STABILITY_TIMEOUT = 30
+DB_RETRY_INTERVAL = 30.0
+DB_MAX_ATTEMPTS = 20
 
 
-class IV4FileHandler(FileSystemEventHandler):
-
-    def __init__(self):
+class _WakeHandler(FileSystemEventHandler):
+    def __init__(self, wake: threading.Event):
         super().__init__()
+        self.wake = wake
 
-        self.processing_groups = set()
+    def on_any_event(self, event):
+        if not event.is_directory:
+            self.wake.set()
 
-        self.lock = threading.Lock()
 
-    def get_group_id(self, file_path: Path) -> str:
-        return file_path.stem.split("_")[0]
+class IV4Agent:
 
-    def wait_until_stable(
+    def __init__(
         self,
-        file_path: Path,
-    ) -> bool:
+        settings: Settings,
+        repository: DatabaseRepository | None = None,
+        clock=time.monotonic,
+    ):
+        self.settings = settings
+        settings.ensure_dirs()
+        self.repo = repository or DatabaseRepository(settings.database_path)
+        self.tracker = StabilityTracker(settings.settle_seconds, clock=clock)
+        self.clock = clock
 
-        start_time = time.time()
+        self.stop_event = threading.Event()
+        self.wake = threading.Event()
+        self._last_retry = 0.0
 
-        previous_size = -1
-        stable_count = 0
+        self.stats = {
+            "started_at": utc_now(),
+            "processed": 0,
+            "pass": 0,
+            "fail": 0,
+            "unknown": 0,
+            "duplicates": 0,
+            "errors": 0,
+            "last_success_at": None,
+            "last_error_at": None,
+            "last_error": None,
+        }
 
-        while True:
+    # ------------------------------------------------------------
+    # Scan incoming/
+    # ------------------------------------------------------------
 
-            # -----------------------------------------
-            # File may have been moved by another event
-            # -----------------------------------------
+    def scan_once(self) -> None:
+        s = self.settings
+        groups = find_groups(s.incoming_dir, s.supported_image_ext, s.supported_text_ext)
 
-            if not file_path.exists():
+        all_files = {f for files in groups.values() for f in files}
+        self.tracker.prune(all_files)
 
-                print(
-                    f"[SKIP] "
-                    f"File no longer exists: "
-                    f"{file_path.name}"
-                )
+        now = self.clock()
 
-                return False
-
-            current_size = file_path.stat().st_size
-
-            print(
-                f"[CHECKING] "
-                f"name={file_path.name} "
-                f"size={current_size} bytes"
-            )
-
-            if current_size == previous_size:
-
-                stable_count += 1
-
-            else:
-
-                stable_count = 0
-
-            if stable_count >= STABILITY_REQUIRED_CHECKS:
-
-                return True
-
-            previous_size = current_size
-
-            if (
-                time.time() - start_time
-                >= STABILITY_TIMEOUT
-            ):
-
-                return False
-
-            time.sleep(
-                STABILITY_CHECK_INTERVAL
-            )
-
-    def on_created(self, event):
-
-        if event.is_directory:
-            return
-
-        file_path = Path(event.src_path)
-
-        if (
-            file_path.suffix.lower()
-            not in SUPPORTED_EXTENSIONS
-        ):
-            return
-
-        group_id = self.get_group_id(file_path)
-
-        # -----------------------------------------
-        # Group Lock
-        # -----------------------------------------
-
-        with self.lock:
-
-            if group_id in self.processing_groups:
-
-                print(
-                    f"[SKIP] "
-                    f"Group already processing: "
-                    f"{group_id}"
-                )
-
+        for group_id, files in sorted(groups.items()):
+            if self.stop_event.is_set():
                 return
 
-            self.processing_groups.add(group_id)
+            stable = [self.tracker.observe(f) for f in files]
+            all_stable = all(stable)
 
+            status = validate_group(
+                group_id, files, s.supported_image_ext, s.supported_text_ext,
+                s.expected_images, s.expected_texts,
+            )
+
+            if status.status == COMPLETE and all_stable:
+                self._handle_complete(status)
+
+            elif status.status == INVALID and all_stable:
+                self._quarantine_loose(status, f"INVALID group: {status.reason}")
+
+            elif status.status == WAITING:
+                first = min(
+                    (self.tracker.first_seen(f) or now) for f in files
+                )
+                if now - first >= s.group_timeout and all_stable:
+                    names = ", ".join(f.name for f in status.files)
+                    self._quarantine_loose(
+                        status,
+                        f"INCOMPLETE after {s.group_timeout:.0f}s "
+                        f"(images={len(status.image_files)}, texts={len(status.text_files)}): {names}",
+                    )
+
+    def _quarantine_loose(self, status: GroupStatus, reason: str) -> None:
+        name = make_uid(status.group_id)
+        quarantine(status.files, self.settings.error_dir, name, reason)
+        self.tracker.forget(status.files)
+        self._record_error(reason)
+
+    # ------------------------------------------------------------
+    # Claim + process one complete group
+    # ------------------------------------------------------------
+
+    def _handle_complete(self, status: GroupStatus) -> None:
+        s = self.settings
+        group_id = status.group_id
+        uid = make_uid(group_id)
+        folder = s.processing_dir / uid
+
+        moved: list[Path] = []
         try:
-
-            print()
-            print(
-                f"[NEW FILE] "
-                f"name={file_path.name} "
-                f"group={group_id}"
-            )
-
-            is_stable = self.wait_until_stable(
-                file_path
-            )
-
-            if not is_stable:
-
-                print(
-                    f"[SKIP] "
-                    f"File not ready: "
-                    f"{file_path.name}"
-                )
-
-                return
-
-            print(
-                f"[READY] "
-                f"name={file_path.name} "
-                f"size={file_path.stat().st_size} bytes"
-            )
-
-            print(
-                f"[MATCHER] "
-                f"Checking group={group_id}..."
-            )
-
-            result = process_group(
-                group_id=group_id,
-                incoming_folder=WATCH_FOLDER,
-                processing_folder=PROCESSING_FOLDER,
-            )
-
-            if result == "COMPLETE":
-
-                print(
-                    f"[COMPLETE] "
-                    f"group={group_id}"
-                )
-
-                pipeline_result = process_inspection(
-                    inspection_id=group_id,
-                    processing_folder=PROCESSING_FOLDER,
-                )
-
-                if pipeline_result == "SUCCESS":
-
-                    print(
-                        f"[DONE] "
-                        f"group={group_id}"
-                    )
-
-                else:
-
-                    print(
-                        f"[PIPELINE FAILED] "
-                        f"group={group_id}"
-                    )
-
-
-            elif result == "WAITING":
-
-                print(
-                    f"[WAITING] "
-                    f"group={group_id}"
-                )
-
-            elif result == "SKIP":
-
-                print(
-                    f"[SKIP] "
-                    f"group={group_id}"
-                )
-
+            sha = content_hash(status.files)
+            for f in status.files:
+                moved += move_files([f], folder)
+        except OSError as exc:
+            # e.g. IV4 still has the file open on Windows -> roll back, retry next scan
+            log.warning("[CLAIM] group=%s not movable yet: %s", group_id, exc)
+            for m in moved:
+                try:
+                    move_files([m], s.incoming_dir)
+                except OSError:
+                    log.exception("[CLAIM] rollback failed for %s", m)
+            try:
+                folder.rmdir()
+            except OSError:
+                pass
+            return
         finally:
+            self.tracker.forget(status.files)
 
-            with self.lock:
+        image = next((f for f in moved if f.suffix.lower() in s.supported_image_ext), None)
+        texts = [f for f in moved if f.suffix.lower() in s.supported_text_ext]
+        manifest = create_manifest(uid, group_id, image or folder, texts, sha)
+        save_manifest(manifest, folder)
+        log.info("[CLAIMED] group=%s uid=%s files=%d", group_id, uid, len(moved))
 
-                self.processing_groups.discard(
-                    group_id
-                )
+        self._process_folder(folder, manifest)
 
+    def _process_folder(self, folder: Path, manifest: dict) -> None:
+        uid = manifest["uid"]
+        manifest["attempts"] = manifest.get("attempts", 0) + 1
+        try:
+            result = run_pipeline(folder, manifest, self.repo, self.settings)
 
-def main():
+        except PipelineError as exc:
+            manifest["error"] = str(exc)
+            if exc.stage == "DATABASE" and manifest["attempts"] < DB_MAX_ATTEMPTS:
+                save_manifest(manifest, folder)
+                log.error("[DB RETRY] uid=%s attempt=%d %s", uid, manifest["attempts"], exc)
+                self._record_error(str(exc))
+                return
+            manifest["status"] = FAILED
+            save_manifest(manifest, folder)
+            quarantine(folder, self.settings.error_dir, uid, str(exc))
+            self._record_error(str(exc))
+            return
 
-    WATCH_FOLDER.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
+        except Exception as exc:  # noqa: BLE001 – never let one file kill the service
+            log.exception("[UNEXPECTED] uid=%s", uid)
+            manifest["status"] = FAILED
+            manifest["error"] = repr(exc)
+            save_manifest(manifest, folder)
+            quarantine(folder, self.settings.error_dir, uid, f"UNEXPECTED: {exc!r}")
+            self._record_error(repr(exc))
+            return
 
-    PROCESSING_FOLDER.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
+        if result.action == "DUPLICATE":
+            manifest["status"] = FAILED
+            manifest["error"] = f"DUPLICATE of database id {result.database_id}"
+            save_manifest(manifest, folder)
+            quarantine(folder, self.settings.error_dir, uid, manifest["error"])
+            self.stats["duplicates"] += 1
+            return
 
-    print("=" * 60)
-    print("IV4 Data Agent")
-    print("=" * 60)
+        manifest["status"] = DONE
+        manifest["error"] = None
+        manifest["analysis_status"] = result.status
+        manifest["database_id"] = result.database_id
+        save_manifest(manifest, folder)
 
-    print(
-        f"Watching  : {WATCH_FOLDER}"
-    )
+        self.stats["processed"] += 1
+        key = result.status.lower()
+        if key in self.stats:
+            self.stats[key] += 1
+        self.stats["last_success_at"] = utc_now()
 
-    print(
-        f"Processing: {PROCESSING_FOLDER}"
-    )
-
-    print(
-        "Supported : JPG, JPEG, TXT"
-    )
-
-    print(
-        f"Stability : "
-        f"{STABILITY_REQUIRED_CHECKS} checks × "
-        f"{STABILITY_CHECK_INTERVAL}s"
-    )
-
-    print("Press Ctrl+C to stop.")
-
-    print("=" * 60)
-
-    event_handler = IV4FileHandler()
-
-    observer = Observer()
-
-    observer.schedule(
-        event_handler,
-        str(WATCH_FOLDER),
-        recursive=False,
-    )
-
-    observer.start()
-
-    try:
-
-        while True:
-            time.sleep(1)
-
-    except KeyboardInterrupt:
-
-        print(
-            "\nStopping IV4 Data Agent..."
+        log.info(
+            "[DONE] uid=%s status=%s action=%s db_id=%s",
+            uid, result.status, result.action, result.database_id,
         )
 
-        observer.stop()
+    # ------------------------------------------------------------
+    # Recovery: processing/ folders left CLAIMED (crash / DB down)
+    # ------------------------------------------------------------
 
-    observer.join()
+    def recover_processing(self) -> int:
+        recovered = 0
+        for folder in sorted(p for p in self.settings.processing_dir.iterdir() if p.is_dir()):
+            manifest = load_manifest(folder)
+            if manifest is None:
+                # Legacy (v1) folder or broken manifest: leave it alone but say so once.
+                continue
+            if manifest.get("status") == CLAIMED:
+                log.info("[RECOVER] uid=%s", manifest.get("uid"))
+                self._process_folder(folder, manifest)
+                recovered += 1
+        return recovered
+
+    # ------------------------------------------------------------
+    # Health
+    # ------------------------------------------------------------
+
+    def _record_error(self, msg: str) -> None:
+        self.stats["errors"] += 1
+        self.stats["last_error_at"] = utc_now()
+        self.stats["last_error"] = msg[:500]
+
+    def write_health(self) -> None:
+        try:
+            pending = sum(1 for p in self.settings.incoming_dir.iterdir() if p.is_file())
+        except OSError:
+            pending = -1
+        health = {
+            **self.stats,
+            "heartbeat_at": utc_now(),
+            "incoming_files": pending,
+            "incoming_dir": str(self.settings.incoming_dir),
+            "database": str(self.settings.database_path),
+        }
+        path = self.settings.log_dir / "health.json"
+        tmp = path.with_suffix(".tmp")
+        try:
+            tmp.write_text(json.dumps(health, indent=2), encoding="utf-8")
+            tmp.replace(path)
+        except OSError as exc:
+            log.warning("[HEALTH] cannot write %s: %s", path, exc)
+
+    # ------------------------------------------------------------
+    # Main loop
+    # ------------------------------------------------------------
+
+    def run(self) -> None:
+        s = self.settings
+        log.info("=" * 60)
+        log.info("IV4 Data Agent starting")
+        log.info("Incoming   : %s", s.incoming_dir)
+        log.info("Processing : %s", s.processing_dir)
+        log.info("Error      : %s", s.error_dir)
+        log.info("Database   : %s", s.database_path)
+        log.info("Settle     : %.1fs  Group timeout: %.0fs", s.settle_seconds, s.group_timeout)
+        log.info("=" * 60)
+
+        n = self.recover_processing()
+        if n:
+            log.info("[RECOVER] %d inspection(s) re-processed", n)
+
+        observer = self._start_observer()
+
+        try:
+            while not self.stop_event.is_set():
+                try:
+                    self.scan_once()
+                    if self.clock() - self._last_retry >= DB_RETRY_INTERVAL:
+                        self._last_retry = self.clock()
+                        self.recover_processing()
+                    self.write_health()
+                except Exception:  # noqa: BLE001
+                    log.exception("[SCAN] unexpected error; continuing")
+                self.wake.wait(s.scan_interval)
+                self.wake.clear()
+        finally:
+            if observer is not None:
+                observer.stop()
+                observer.join(timeout=5)
+            self.write_health()
+            self.repo.dispose()
+            log.info("IV4 Data Agent stopped")
+
+    def _start_observer(self):
+        cls = PollingObserver if self.settings.use_polling else Observer
+        try:
+            observer = cls()
+            observer.schedule(_WakeHandler(self.wake), str(self.settings.incoming_dir), recursive=False)
+            observer.start()
+            return observer
+        except Exception as exc:  # noqa: BLE001
+            log.warning("[WATCH] file events unavailable (%s); polling every %.1fs only",
+                        exc, self.settings.scan_interval)
+            return None
+
+    def stop(self, *_):
+        self.stop_event.set()
+        self.wake.set()
+
+
+def main() -> None:
+    from app.logging_setup import setup_logging
+
+    settings = load_settings()
+    setup_logging(settings)
+    agent = IV4Agent(settings)
+
+    signal.signal(signal.SIGINT, agent.stop)
+    signal.signal(signal.SIGTERM, agent.stop)
+    if hasattr(signal, "SIGBREAK"):  # Windows service stop / Ctrl+Break
+        signal.signal(signal.SIGBREAK, agent.stop)
+
+    agent.run()
 
 
 if __name__ == "__main__":

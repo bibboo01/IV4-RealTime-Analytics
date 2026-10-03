@@ -1,0 +1,47 @@
+<#
+Health check for IV4 Data Agent. Exit code 0 = healthy, 1 = unhealthy.
+Schedule every 5 minutes in Task Scheduler; on failure it writes to the
+Windows Application event log (source "IV4DataAgent") so IT monitoring
+can alert on it.
+
+    .\deploy\healthcheck.ps1 -MaxHeartbeatAgeSec 60 -MaxIncomingFiles 50
+#>
+param(
+    [string]$ProjectDir = (Resolve-Path "$PSScriptRoot\..").Path,
+    [int]$MaxHeartbeatAgeSec = 60,
+    [int]$MaxIncomingFiles = 50,
+    [string]$ServiceName = "IV4DataAgent"
+)
+
+$problems = @()
+
+$svc = Get-Service $ServiceName -ErrorAction SilentlyContinue
+if (-not $svc -or $svc.Status -ne "Running") { $problems += "service $ServiceName not running" }
+
+$healthFile = Join-Path $ProjectDir "logs\health.json"
+if (-not (Test-Path $healthFile)) {
+    $problems += "health.json missing"
+} else {
+    $h = Get-Content $healthFile -Raw | ConvertFrom-Json
+    $age = ((Get-Date).ToUniversalTime() - ([datetime]$h.heartbeat_at).ToUniversalTime()).TotalSeconds
+    if ($age -gt $MaxHeartbeatAgeSec) { $problems += "heartbeat is $([int]$age)s old" }
+    if ($h.incoming_files -gt $MaxIncomingFiles) { $problems += "backlog: $($h.incoming_files) files in incoming" }
+}
+
+$errorDir = Join-Path $ProjectDir "data\error"
+if (Test-Path $errorDir) {
+    $recent = Get-ChildItem $errorDir -Directory | Where-Object { $_.LastWriteTime -gt (Get-Date).AddMinutes(-15) }
+    if ($recent.Count -gt 0) { $problems += "$($recent.Count) inspection(s) moved to data\error in the last 15 min" }
+}
+
+if ($problems.Count -gt 0) {
+    $msg = "IV4 Data Agent UNHEALTHY: " + ($problems -join "; ")
+    if (-not [System.Diagnostics.EventLog]::SourceExists("IV4DataAgent")) {
+        try { New-EventLog -LogName Application -Source "IV4DataAgent" } catch {}
+    }
+    try { Write-EventLog -LogName Application -Source "IV4DataAgent" -EntryType Error -EventId 1001 -Message $msg } catch {}
+    Write-Output $msg
+    exit 1
+}
+Write-Output "IV4 Data Agent healthy"
+exit 0

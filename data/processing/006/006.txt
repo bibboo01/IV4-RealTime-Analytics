@@ -1,8 +1,0 @@
-inspection_id=006
-timestamp=2026-09-28 14:30:15
-machine_id=MACHINE_01
-camera_id=CAM_01
-result=OK
-score=98.5
-width=120.4
-height=45.2

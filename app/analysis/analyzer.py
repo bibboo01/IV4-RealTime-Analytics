@@ -1,11 +1,16 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from typing import Any
 
-from app.parser.inspection_record import (
-    InspectionRecord,
-)
+from app.parser.inspection_record import InspectionRecord
+
+PASS = "PASS"
+FAIL = "FAIL"
+UNKNOWN = "UNKNOWN"   # not enough data to decide -> never silently PASS
+
+OK_RESULTS = {"OK", "PASS", "GO", "1", "TRUE"}
+NG_RESULTS = {"NG", "FAIL", "NOGO", "0", "FALSE"}
 
 
 @dataclass
@@ -14,9 +19,9 @@ class AnalysisResult:
     Result produced by the analysis engine.
 
     NOTE:
-    Rules are currently based on Mock Data.
-    They must be updated when real IV4 data and
-    actual business rules are available.
+    Rules are currently based on Mock Data. Thresholds are configurable
+    (IV4_SCORE_THRESHOLD / IV4_CONFIDENCE_THRESHOLD) and must be confirmed
+    with real IV4 data and the actual business rules.
     """
 
     inspection_id: str
@@ -35,84 +40,48 @@ class AnalysisResult:
 
 def analyze_inspection(
     record: InspectionRecord,
+    score_threshold: float | None = 90.0,
+    confidence_threshold: float | None = None,
 ) -> AnalysisResult:
 
-    reasons: list[str] = []
+    fail_reasons: list[str] = []
 
-    # --------------------------------------------------
-    # Mock Analysis Rules
-    # --------------------------------------------------
+    result = str(record.result).strip().upper() if record.result is not None else None
 
-    # Rule 1:
-    # Explicit NG result -> FAIL
-    if record.result is not None:
-        if str(record.result).upper() == "NG":
-            reasons.append(
-                "Inspection result is NG"
-            )
+    if result in NG_RESULTS:
+        fail_reasons.append(f"Inspection result is {record.result}")
 
-            return AnalysisResult(
-                inspection_id=record.inspection_id,
-                status="FAIL",
-                score=record.score,
-                defect_count=record.defect_count,
-                confidence=record.confidence,
-                inspection_time_ms=record.inspection_time_ms,
-                reasons=reasons,
-            )
+    if record.defect_count is not None and record.defect_count > 0:
+        fail_reasons.append(f"Defect count = {record.defect_count}")
 
-    # Rule 2:
-    # Any defect -> FAIL
     if (
-        record.defect_count is not None
-        and record.defect_count > 0
+        score_threshold is not None
+        and record.score is not None
+        and record.score < score_threshold
     ):
-        reasons.append(
-            f"Defect count = {record.defect_count}"
-        )
+        fail_reasons.append(f"Score below threshold: {record.score} < {score_threshold}")
 
-        return AnalysisResult(
-            inspection_id=record.inspection_id,
-            status="FAIL",
-            score=record.score,
-            defect_count=record.defect_count,
-            confidence=record.confidence,
-            inspection_time_ms=record.inspection_time_ms,
-            reasons=reasons,
-        )
-
-    # Rule 3:
-    # Mock score threshold
     if (
-        record.score is not None
-        and record.score < 90
+        confidence_threshold is not None
+        and record.confidence is not None
+        and record.confidence < confidence_threshold
     ):
-        reasons.append(
-            f"Score below threshold: "
-            f"{record.score} < 90"
+        fail_reasons.append(
+            f"Confidence below threshold: {record.confidence} < {confidence_threshold}"
         )
 
-        return AnalysisResult(
-            inspection_id=record.inspection_id,
-            status="FAIL",
-            score=record.score,
-            defect_count=record.defect_count,
-            confidence=record.confidence,
-            inspection_time_ms=record.inspection_time_ms,
-            reasons=reasons,
-        )
-
-    # --------------------------------------------------
-    # No failure conditions detected
-    # --------------------------------------------------
-
-    reasons.append(
-        "No failure conditions detected"
-    )
+    if fail_reasons:
+        status, reasons = FAIL, fail_reasons
+    elif result is None:
+        status, reasons = UNKNOWN, ["Result field missing"]
+    elif result not in OK_RESULTS:
+        status, reasons = UNKNOWN, [f"Unrecognised result value: {record.result}"]
+    else:
+        status, reasons = PASS, ["No failure conditions detected"]
 
     return AnalysisResult(
         inspection_id=record.inspection_id,
-        status="PASS",
+        status=status,
         score=record.score,
         defect_count=record.defect_count,
         confidence=record.confidence,
