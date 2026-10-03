@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from app.analysis.analyzer import analyze_inspection
@@ -29,6 +30,20 @@ class PipelineResult:
     status: str            # PASS / FAIL / UNKNOWN
     action: str            # CREATED / UPDATED / DUPLICATE
     database_id: int
+    archive_rel: str       # <YYYY-MM-DD>/<OK|NG|UNKNOWN>/<uid>, relative to archive_dir
+
+
+STATUS_FOLDER = {"PASS": "OK", "FAIL": "NG"}
+
+
+def archive_rel_path(uid: str, status: str, timestamp: str | None, created_at: str | None = None) -> str:
+    """Day folder from sensor time (local), else from ingestion time."""
+    day = None
+    if timestamp and len(timestamp) >= 10 and timestamp[4] == "-":
+        day = timestamp[:10]
+    if day is None:
+        day = (created_at or "")[:10] or datetime.now().strftime("%Y-%m-%d")
+    return f"{day}/{STATUS_FOLDER.get(status, 'UNKNOWN')}/{uid}"
 
 
 def verify_image(path: Path) -> None:
@@ -79,6 +94,8 @@ def run_pipeline(
     except Exception as exc:  # noqa: BLE001
         raise PipelineError("ANALYSIS", str(exc)) from exc
 
+    archive_rel = archive_rel_path(uid, analysis.status, record.timestamp, manifest.get("created_at"))
+
     try:
         saved, action = repository.save_or_update_inspection(
             record,
@@ -86,7 +103,7 @@ def run_pipeline(
             uid=uid,
             content_hash=manifest.get("content_hash"),
             image_file=manifest.get("image"),
-            folder=str(folder),
+            folder=archive_rel,
         )
     except Exception as exc:  # noqa: BLE001
         raise PipelineError("DATABASE", str(exc)) from exc
@@ -97,6 +114,7 @@ def run_pipeline(
         status=analysis.status,
         action=action,
         database_id=saved.id,
+        archive_rel=archive_rel,
     )
 
 

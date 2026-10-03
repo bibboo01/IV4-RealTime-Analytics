@@ -12,7 +12,8 @@ from pathlib import Path
 from typing import Callable
 
 from app.config import Settings, load_settings
-from app.ingestion.record import DONE, load_manifest, save_manifest, utc_now
+from app.database.repository import DatabaseRepository
+from app.ingestion.record import load_manifest, utc_now
 from app.upload.mock_uploader import upload_inspection as mock_upload
 
 log = logging.getLogger(__name__)
@@ -21,15 +22,12 @@ log = logging.getLogger(__name__)
 Uploader = Callable[[Path, dict], "str | bool"]
 
 
-def pending_uploads(processing_dir: Path) -> list[tuple[Path, dict]]:
-    out = []
-    if not processing_dir.exists():
-        return out
-    for folder in sorted(p for p in processing_dir.iterdir() if p.is_dir()):
-        m = load_manifest(folder)
-        if m and m.get("status") == DONE and not m.get("uploaded_at"):
-            out.append((folder, m))
-    return out
+def pending_uploads(settings: Settings, repo: DatabaseRepository) -> list[tuple[str, Path]]:
+    """(uid, archive folder) of inspections still to upload, oldest first."""
+    return [
+        (uid, settings.archive_dir / rel)
+        for uid, rel in repo.pending_uploads(settings.upload_statuses, settings.upload_batch)
+    ]
 
 
 def make_uploader(settings: Settings) -> Uploader:
@@ -46,33 +44,41 @@ def process_upload_queue(
     settings: Settings | None = None,
     uploader: Uploader | None = None,
     stop_event: threading.Event | None = None,
+    repo: DatabaseRepository | None = None,
 ) -> int:
+    """
+    Upload one batch. Which inspections are sent is set by IV4_UPLOAD_STATUSES
+    (default FAIL,UNKNOWN = NG images only; ALL = everything).
+    """
+    from app.upload.google_drive import DriveConfigError
+
     settings = settings or load_settings()
+    own_repo = repo is None
+    repo = repo or DatabaseRepository(settings.database_path)
     uploader = uploader or make_uploader(settings)
     uploaded = 0
-    for folder, manifest in pending_uploads(settings.processing_dir)[: settings.upload_batch]:
-        if stop_event is not None and stop_event.is_set():
-            break
-        try:
-            ref = uploader(folder, manifest)
-        except Exception as exc:  # noqa: BLE001
-            from app.upload.google_drive import DriveConfigError
-
-            if isinstance(exc, DriveConfigError):
+    try:
+        for uid, folder in pending_uploads(settings, repo):
+            if stop_event is not None and stop_event.is_set():
+                break
+            if not folder.exists():
+                log.warning("[UPLOAD] %s: files no longer on disk (retention?) - skipped", uid)
+                repo.mark_uploaded(uid, "MISSING")
+                continue
+            manifest = load_manifest(folder) or {"uid": uid}
+            try:
+                ref = uploader(folder, manifest)
+            except DriveConfigError:
                 raise  # needs a human; caller logs once and backs off
-            manifest["upload_error"] = str(exc)[:500]
-            manifest["upload_attempts"] = manifest.get("upload_attempts", 0) + 1
-            save_manifest(manifest, folder)
-            log.warning("[UPLOAD RETRY] %s: %s", folder.name, exc)
-            continue
-        if ref:
-            manifest["uploaded_at"] = utc_now()
-            manifest["upload_backend"] = settings.upload_backend
-            if isinstance(ref, str):
-                manifest["upload_ref"] = ref
-            manifest.pop("upload_error", None)
-            save_manifest(manifest, folder)
-            uploaded += 1
+            except Exception as exc:  # noqa: BLE001
+                log.warning("[UPLOAD RETRY] %s: %s", uid, exc)
+                continue
+            if ref:
+                repo.mark_uploaded(uid, ref if isinstance(ref, str) else settings.upload_backend)
+                uploaded += 1
+    finally:
+        if own_repo:
+            repo.dispose()
     return uploaded
 
 
@@ -84,18 +90,26 @@ class UploadWorker(threading.Thread):
         self.settings = settings
         self.stop_event = stop_event
         self._uploader = uploader
+        self.repo: DatabaseRepository | None = None
         self.stats = {"uploaded": 0, "last_upload_at": None, "last_upload_error": None, "pending": 0}
 
     def run(self) -> None:
-        from app.upload.google_drive import DriveConfigError
-
         log.info("[UPLOAD] worker started backend=%s interval=%.0fs",
                  self.settings.upload_backend, self.settings.upload_interval)
+        self.repo = DatabaseRepository(self.settings.database_path)
+        try:
+            self._loop()
+        finally:
+            self.repo.dispose()
+
+    def _loop(self) -> None:
+        from app.upload.google_drive import DriveConfigError
+
         while not self.stop_event.is_set():
             try:
                 if self._uploader is None:
                     self._uploader = make_uploader(self.settings)
-                n = process_upload_queue(self.settings, self._uploader, self.stop_event)
+                n = process_upload_queue(self.settings, self._uploader, self.stop_event, self.repo)
                 if n:
                     self.stats["uploaded"] += n
                     self.stats["last_upload_at"] = utc_now()
@@ -110,7 +124,7 @@ class UploadWorker(threading.Thread):
                 self.stats["last_upload_error"] = str(exc)[:500]
                 self._uploader = None
             try:
-                self.stats["pending"] = len(pending_uploads(self.settings.processing_dir))
-            except OSError:
+                self.stats["pending"] = self.repo.count_pending_uploads(self.settings.upload_statuses)
+            except Exception:  # noqa: BLE001
                 pass
             self.stop_event.wait(self.settings.upload_interval)

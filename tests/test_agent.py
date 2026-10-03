@@ -33,10 +33,14 @@ def test_complete_inspection_goes_to_db(settings, repo, clock):
 
     assert repo.count() == 1
     assert list(settings.incoming_dir.iterdir()) == []
-    (folder,) = _dirs(settings.processing_dir)
+    assert _dirs(settings.processing_dir) == []          # in-flight only
+    day = settings.archive_dir / "2026-09-28" / "OK"     # sensor date / status
+    (folder,) = _dirs(day)
     assert folder.startswith("007__")
-    m = load_manifest(settings.processing_dir / folder)
+    m = load_manifest(day / folder)
     assert m["status"] == DONE and m["analysis_status"] == "PASS"
+    assert m["archive"] == f"2026-09-28/OK/{folder}"
+    assert repo.get_by_inspection_id("007").folder == m["archive"]
     assert agent.stats["processed"] == 1
 
 
@@ -142,17 +146,43 @@ def test_database_outage_is_retried_not_quarantined(settings, repo, clock, monke
     monkeypatch.setattr(repo, "save_or_update_inspection", real)
     assert agent.recover_processing() == 1         # same path used on restart
     assert repo.count() == 1
-    assert load_manifest(settings.processing_dir / folder)["status"] == DONE
+    assert _dirs(settings.processing_dir) == []
+    assert load_manifest(settings.archive_dir / "2026-09-28" / "OK" / folder)["status"] == DONE
 
 
-def test_upload_queue_only_takes_done(settings, repo, clock):
+def test_done_but_not_archived_is_finished_on_recovery(settings, repo, clock, monkeypatch):
+    """Crash (or Windows lock) between DB save and the archive move."""
+    agent = IV4Agent(settings, repo, clock=clock)
+    monkeypatch.setattr(agent, "_archive", lambda *a: None)
+    write_inspection(settings.incoming_dir, "015")
+    _scan_until_settled(agent, clock)
+    (folder,) = _dirs(settings.processing_dir)
+    monkeypatch.undo()
+    agent.recover_processing()
+    assert _dirs(settings.processing_dir) == []
+    assert (settings.archive_dir / "2026-09-28" / "OK" / folder / "015.jpg").exists()
+
+
+def test_ng_goes_to_ng_folder(settings, repo, clock):
+    agent = IV4Agent(settings, repo, clock=clock)
+    write_inspection(settings.incoming_dir, "016", result="NG")
+    _scan_until_settled(agent, clock)
+    assert len(_dirs(settings.archive_dir / "2026-09-28" / "NG")) == 1
+
+
+def test_upload_queue_default_sends_only_ng(settings, repo, clock):
     settings.upload_backend = "mock"
     agent = IV4Agent(settings, repo, clock=clock)
-    write_inspection(settings.incoming_dir, "014")
+    write_inspection(settings.incoming_dir, "014")                 # OK
+    write_inspection(settings.incoming_dir, "017", result="NG")    # NG
     _scan_until_settled(agent, clock)
-    assert process_upload_queue(settings) == 1
-    assert process_upload_queue(settings) == 0      # already uploaded
-    assert len(_dirs(settings.uploaded_dir)) == 1
+    assert process_upload_queue(settings, repo=repo) == 1
+    assert process_upload_queue(settings, repo=repo) == 0           # already uploaded
+    assert [d.split("__")[0] for d in _dirs(settings.uploaded_dir)] == ["017"]
+
+    settings.upload_statuses = None                                 # IV4_UPLOAD_STATUSES=ALL
+    assert process_upload_queue(settings, repo=repo) == 1
+    assert repo.get_by_inspection_id("014").upload_ref == "mock"
 
 
 def test_health_file(settings, repo, clock):

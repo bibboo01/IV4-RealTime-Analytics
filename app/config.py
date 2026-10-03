@@ -39,6 +39,7 @@ class Settings:
     processing_dir: Path
     error_dir: Path
     uploaded_dir: Path
+    archive_dir: Path
     database_path: Path
     log_dir: Path
 
@@ -60,8 +61,16 @@ class Settings:
     score_threshold: float | None = None
     confidence_threshold: float | None = None
 
+    # Retention (0 = keep forever). Images are kept per day/status folder.
+    retention_ok_days: int = 0          # delete OK images older than N days
+    retention_ng_days: int = 0          # delete NG/UNKNOWN images older than N days
+    retention_rows_days: int = 0        # delete per-inspection DB rows older than N days (hourly stats are kept)
+    cleanup_interval: float = 3600.0
+    min_free_gb: float = 20.0           # health warning when free disk drops below this
+
     # Online storage (Phase 7)
     upload_enabled: bool = False
+    upload_statuses: frozenset[str] | None = frozenset({"FAIL", "UNKNOWN"})  # None = upload everything
     upload_backend: str = "gdrive"      # gdrive | mock
     upload_interval: float = 30.0       # seconds between upload rounds
     upload_batch: int = 50              # max inspections per round
@@ -89,10 +98,18 @@ class Settings:
             self.processing_dir,
             self.error_dir,
             self.uploaded_dir,
+            self.archive_dir,
             self.database_path.parent,
             self.log_dir,
         ):
             d.mkdir(parents=True, exist_ok=True)
+
+
+def _statuses(value: str) -> frozenset[str] | None:
+    value = value.strip().upper()
+    if value in {"", "ALL", "*"}:
+        return None
+    return frozenset(v.strip() for v in value.split(",") if v.strip())
 
 
 def load_settings(
@@ -118,6 +135,7 @@ def load_settings(
         processing_dir=_path(get("PROCESSING_DIR", str(data_dir / "processing")), base),
         error_dir=_path(get("ERROR_DIR", str(data_dir / "error")), base),
         uploaded_dir=_path(get("UPLOADED_DIR", str(data_dir / "uploaded")), base),
+        archive_dir=_path(get("ARCHIVE_DIR", str(data_dir / "archive")), base),
         database_path=_path(get("DATABASE_PATH", str(data_dir / "database" / "iv4.db")), base),
         log_dir=_path(get("LOG_DIR", "logs"), base),
         scan_interval=float(get("SCAN_INTERVAL", "1.0")),
@@ -132,7 +150,13 @@ def load_settings(
         machine_id=get("MACHINE_ID", "") or None,
         score_threshold=float(get("SCORE_THRESHOLD", "")) if get("SCORE_THRESHOLD", "") else None,
         confidence_threshold=float(conf_th) if conf_th else None,
+        retention_ok_days=int(get("RETENTION_OK_DAYS", "0")),
+        retention_ng_days=int(get("RETENTION_NG_DAYS", "0")),
+        retention_rows_days=int(get("RETENTION_ROWS_DAYS", "0")),
+        cleanup_interval=float(get("CLEANUP_INTERVAL", "3600")),
+        min_free_gb=float(get("MIN_FREE_GB", "20")),
         upload_enabled=get("UPLOAD_ENABLED", "false").lower() in {"1", "true", "yes"},
+        upload_statuses=_statuses(get("UPLOAD_STATUSES", "FAIL,UNKNOWN")),
         upload_backend=get("UPLOAD_BACKEND", "gdrive").lower(),
         upload_interval=float(get("UPLOAD_INTERVAL", "30")),
         upload_batch=int(get("UPLOAD_BATCH", "50")),

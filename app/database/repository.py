@@ -7,6 +7,9 @@ from pathlib import Path
 
 from sqlalchemy import (
     DateTime,
+    PrimaryKeyConstraint,
+    delete,
+    update,
     Float,
     Integer,
     String,
@@ -25,7 +28,7 @@ from app.parser.inspection_record import InspectionRecord
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 def _utcnow() -> datetime:
@@ -77,11 +80,121 @@ class Inspection(Base):
     raw_data: Mapped[str | None] = mapped_column(Text, nullable=True)
     parse_warnings: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Online storage
+    uploaded_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    upload_ref: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
     # Stored as UTC
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False, index=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
     )
+
+
+class HourlyStats(Base):
+    """
+    One row per (hour, program, sensor). Updated in the same transaction as
+    each new inspection, so dashboards never have to scan millions of rows.
+
+    hour = sensor local time 'YYYY-MM-DD HH' (from 'Time and Date').
+    trigger_min/max: sensor counter range seen in this hour; when the counter
+    did not reset, (trigger_max - trigger_min + 1) - total = files missing.
+    """
+
+    __tablename__ = "hourly_stats"
+    __table_args__ = (PrimaryKeyConstraint("hour", "program_no", "sensor_id"),)
+
+    hour: Mapped[str] = mapped_column(String(13))
+    program_no: Mapped[int] = mapped_column(Integer, default=-1)
+    sensor_id: Mapped[str] = mapped_column(String(100), default="")
+    total: Mapped[int] = mapped_column(Integer, default=0)
+    pass_count: Mapped[int] = mapped_column(Integer, default=0)
+    fail_count: Mapped[int] = mapped_column(Integer, default=0)
+    unknown_count: Mapped[int] = mapped_column(Integer, default=0)
+    time_ms_sum: Mapped[int] = mapped_column(Integer, default=0)
+    time_ms_count: Mapped[int] = mapped_column(Integer, default=0)
+    time_ms_max: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    trigger_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    trigger_max: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    trigger_resets: Mapped[int] = mapped_column(Integer, default=0)
+    last_trigger: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    score_min: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
+class HourlyToolStats(Base):
+    """Per-tool counts per hour: which tool causes NG, and its value trend."""
+
+    __tablename__ = "hourly_tool_stats"
+    __table_args__ = (PrimaryKeyConstraint("hour", "program_no", "sensor_id", "tool_no"),)
+
+    hour: Mapped[str] = mapped_column(String(13))
+    program_no: Mapped[int] = mapped_column(Integer, default=-1)
+    sensor_id: Mapped[str] = mapped_column(String(100), default="")
+    tool_no: Mapped[int] = mapped_column(Integer)
+    tool_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    count: Mapped[int] = mapped_column(Integer, default=0)
+    ng_count: Mapped[int] = mapped_column(Integer, default=0)
+    value_sum: Mapped[float] = mapped_column(Float, default=0.0)
+    value_count: Mapped[int] = mapped_column(Integer, default=0)
+    value_min: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ok_value_min: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
+def _nmin(col: str) -> str:
+    return (f"CASE WHEN excluded.{col} IS NULL THEN {col} WHEN {col} IS NULL THEN excluded.{col} "
+            f"ELSE MIN({col}, excluded.{col}) END")
+
+
+def _nmax(col: str) -> str:
+    return (f"CASE WHEN excluded.{col} IS NULL THEN {col} WHEN {col} IS NULL THEN excluded.{col} "
+            f"ELSE MAX({col}, excluded.{col}) END")
+
+
+_HOURLY_UPSERT = text(f"""
+INSERT INTO hourly_stats (hour, program_no, sensor_id, total, pass_count, fail_count, unknown_count,
+    time_ms_sum, time_ms_count, time_ms_max, trigger_min, trigger_max, trigger_resets, last_trigger, score_min)
+VALUES (:hour, :program_no, :sensor_id, 1, :p, :f, :u, :tms, :tmc, :tmax, :trig, :trig, 0, :trig, :score)
+ON CONFLICT (hour, program_no, sensor_id) DO UPDATE SET
+    total = total + 1,
+    pass_count = pass_count + excluded.pass_count,
+    fail_count = fail_count + excluded.fail_count,
+    unknown_count = unknown_count + excluded.unknown_count,
+    time_ms_sum = time_ms_sum + excluded.time_ms_sum,
+    time_ms_count = time_ms_count + excluded.time_ms_count,
+    time_ms_max = {_nmax("time_ms_max")},
+    trigger_min = {_nmin("trigger_min")},
+    trigger_max = {_nmax("trigger_max")},
+    trigger_resets = trigger_resets + CASE
+        WHEN excluded.last_trigger IS NOT NULL AND last_trigger IS NOT NULL
+             AND excluded.last_trigger < last_trigger - 1000 THEN 1 ELSE 0 END,
+    last_trigger = COALESCE(excluded.last_trigger, last_trigger),
+    score_min = {_nmin("score_min")}
+""")
+
+_TOOL_UPSERT = text(f"""
+INSERT INTO hourly_tool_stats (hour, program_no, sensor_id, tool_no, tool_name, count, ng_count,
+    value_sum, value_count, value_min, ok_value_min)
+VALUES (:hour, :program_no, :sensor_id, :tool_no, :tool_name, 1, :ng, :vsum, :vcnt, :vmin, :okmin)
+ON CONFLICT (hour, program_no, sensor_id, tool_no) DO UPDATE SET
+    tool_name = excluded.tool_name,
+    count = count + 1,
+    ng_count = ng_count + excluded.ng_count,
+    value_sum = value_sum + excluded.value_sum,
+    value_count = value_count + excluded.value_count,
+    value_min = {_nmin("value_min")},
+    ok_value_min = {_nmin("ok_value_min")}
+""")
+
+
+def _num(v):
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def _hour_key(record: InspectionRecord) -> str:
+    ts = record.timestamp or ""
+    if len(ts) >= 13 and ts[4] == "-" and ts[10] == " ":
+        return ts[:13]
+    return datetime.now().strftime("%Y-%m-%d %H")
 
 
 class DatabaseRepository:
@@ -199,7 +312,13 @@ class DatabaseRepository:
             analysis_reason="; ".join(analysis.reasons or [])[:1000],
             image_file=image_file,
             folder=folder,
-            raw_data=json.dumps(record.raw, ensure_ascii=False, default=str),
+            # IV4 rows: everything is already in typed columns + tools_json;
+            # keep raw only when the sensor sent lines we do not map.
+            raw_data=(
+                json.dumps(record.raw, ensure_ascii=False, default=str)
+                if record.source_format != "iv4" or record.raw.get("extra")
+                else None
+            ),
             parse_warnings="; ".join(record.warnings) or None,
             program_no=record.program_no,
             trigger_no=record.trigger_no,
@@ -231,8 +350,34 @@ class DatabaseRepository:
 
             row = Inspection(uid=uid, content_hash=content_hash, **values)
             session.add(row)
+            self._update_hourly(session, record, analysis)
             session.commit()
             return row, "CREATED"
+
+    @staticmethod
+    def _update_hourly(session: Session, record: InspectionRecord, analysis: AnalysisResult) -> None:
+        key = dict(
+            hour=_hour_key(record),
+            program_no=record.program_no if record.program_no is not None else -1,
+            sensor_id=record.camera_id or "",
+        )
+        st = analysis.status
+        tms = record.inspection_time_ms
+        session.execute(_HOURLY_UPSERT, dict(
+            key,
+            p=int(st == "PASS"), f=int(st == "FAIL"), u=int(st not in ("PASS", "FAIL")),
+            tms=tms or 0, tmc=int(tms is not None), tmax=tms,
+            trig=record.trigger_no, score=record.score,
+        ))
+        for t in record.tools or []:
+            v = _num(t.get("value"))
+            ng = (t.get("status") or "").upper() == "NG"
+            session.execute(_TOOL_UPSERT, dict(
+                key,
+                tool_no=t.get("no", 0), tool_name=t.get("name"), ng=int(ng),
+                vsum=v or 0.0, vcnt=int(v is not None), vmin=v,
+                okmin=v if not ng else None,
+            ))
 
     # Backwards-compatible name
     def save_inspection(self, record: InspectionRecord, analysis: AnalysisResult) -> Inspection:
@@ -275,6 +420,51 @@ class DatabaseRepository:
                 select(Inspection.analysis_status, func.count()).group_by(Inspection.analysis_status)
             ).all()
             return {str(s): n for s, n in rows}
+
+    # --------------------------------------------------------
+    # Archive / upload / retention helpers
+    # --------------------------------------------------------
+
+    def set_folder(self, uid: str, folder: str) -> None:
+        with self.engine.begin() as conn:
+            conn.execute(update(Inspection).where(Inspection.uid == uid).values(folder=folder))
+
+    def pending_uploads(self, statuses: frozenset[str] | None, limit: int) -> list[tuple[str, str]]:
+        q = select(Inspection.uid, Inspection.folder).where(
+            Inspection.uploaded_at.is_(None), Inspection.folder.is_not(None)
+        )
+        if statuses is not None:
+            q = q.where(Inspection.analysis_status.in_(sorted(statuses)))
+        with Session(self.engine) as session:
+            return [tuple(r) for r in session.execute(q.order_by(Inspection.id).limit(limit))]
+
+    def count_pending_uploads(self, statuses: frozenset[str] | None) -> int:
+        q = select(func.count()).select_from(Inspection).where(
+            Inspection.uploaded_at.is_(None), Inspection.folder.is_not(None)
+        )
+        if statuses is not None:
+            q = q.where(Inspection.analysis_status.in_(sorted(statuses)))
+        with Session(self.engine) as session:
+            return session.scalar(q) or 0
+
+    def mark_uploaded(self, uid: str, ref: str | None) -> None:
+        with self.engine.begin() as conn:
+            conn.execute(
+                update(Inspection).where(Inspection.uid == uid).values(uploaded_at=_utcnow(), upload_ref=ref)
+            )
+
+    def delete_rows_before(self, cutoff: datetime, batch: int = 5000) -> int:
+        """Delete per-inspection rows older than cutoff (UTC) in small batches."""
+        total = 0
+        while True:
+            with self.engine.begin() as conn:
+                ids = conn.execute(
+                    select(Inspection.id).where(Inspection.created_at < cutoff).limit(batch)
+                ).scalars().all()
+                if not ids:
+                    return total
+                conn.execute(delete(Inspection).where(Inspection.id.in_(ids)))
+            total += len(ids)
 
     def dispose(self) -> None:
         self.engine.dispose()

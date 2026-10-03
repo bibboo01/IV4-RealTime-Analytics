@@ -9,7 +9,7 @@ can alert on it.
 param(
     [string]$ProjectDir = (Resolve-Path "$PSScriptRoot\..").Path,
     [int]$MaxHeartbeatAgeSec = 60,
-    [int]$MaxIncomingFiles = 50,
+    [int]$MaxIncomingFiles = 200,   # ~10 s of full-rate IV4 output
     [string]$ServiceName = "IV4DataAgent"
 )
 
@@ -26,6 +26,7 @@ if (-not (Test-Path $healthFile)) {
     $age = ((Get-Date).ToUniversalTime() - ([datetime]$h.heartbeat_at).ToUniversalTime()).TotalSeconds
     if ($age -gt $MaxHeartbeatAgeSec) { $problems += "heartbeat is $([int]$age)s old" }
     if ($h.incoming_files -gt $MaxIncomingFiles) { $problems += "backlog: $($h.incoming_files) files in incoming" }
+    if ($h.disk_free_gb -ne $null -and $h.disk_free_gb -lt $h.min_free_gb) { $problems += "disk almost full: $($h.disk_free_gb) GB free (minimum $($h.min_free_gb))" }
 }
 
 $errorDir = Join-Path $ProjectDir "data\error"
