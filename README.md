@@ -3,7 +3,7 @@
 ระบบสำหรับรับข้อมูล Inspection จาก **KEYENCE IV4 G500CA** แบบอัตโนมัติ โดยรับไฟล์จาก Sensor ได้แก่ Image (`JPG/JPEG`) และข้อมูลผลการตรวจสอบ (`TXT`) จากนั้นทำการจับคู่ข้อมูล, Parse ข้อมูล, วิเคราะห์ผล และบันทึกลงฐานข้อมูล
 
 > **Current Status:** Core Realtime Pipeline พร้อม Production (hardened, 28 automated tests) — รอทดสอบกับข้อมูลจริงจาก IV4  
-> **Google Drive Integration:** ยังไม่เปิดใช้งาน
+> **Google Drive Integration:** พร้อมใช้งาน (ปิดไว้เป็นค่าเริ่มต้น — ตั้ง `IV4_UPLOAD_ENABLED=true` หลังเชื่อมบัญชี)
 
 ---
 
@@ -203,6 +203,7 @@ iv4-data-agent/
 │
 ├── scripts/
 │   ├── backup_db.py
+│   ├── gdrive_auth.py       # ล็อกอิน Google Drive ครั้งเดียว
 │   └── stats.py
 │
 ├── tests/
@@ -210,7 +211,8 @@ iv4-data-agent/
 │   ├── mock_data/
 │   ├── test_parsing.py
 │   ├── test_database.py
-│   └── test_agent.py
+│   ├── test_agent.py
+│   └── test_google_drive.py
 │
 ├── .env.example
 ├── .gitignore
@@ -315,7 +317,7 @@ mock_uploader.py
 queue.py
 ```
 
-ปัจจุบัน Google Drive ยังไม่ได้เปิดใช้งานใน Core Pipeline
+Google Drive upload ทำงานใน thread แยก เปิดด้วย `IV4_UPLOAD_ENABLED=true` (ดูข้อ 34)
 
 ---
 
@@ -831,6 +833,7 @@ Test ทั้งหมดใช้ temp folder และ temp database — **�
 | --- | --- |
 | `tests/test_parsing.py` | TXT parser (UTF-8/UTF-16/cp874), Inspection Record, Analyzer, Matcher |
 | `tests/test_database.py` | Create/Update, ID ซ้ำเก็บประวัติ, Duplicate hash, Migration จาก v1 |
+| `tests/test_google_drive.py` | Upload ลงโครงสร้าง วัน/UID, root folder สร้างครั้งเดียว, เน็ตหลุดแล้ว retry ไม่ซ้ำ, config ผิดไม่ทำให้ service ล่ม |
 | `tests/test_agent.py` | End-to-end: ไฟล์ครบ/ไม่ครบ, counter reset, backlog ตอน startup, timeout, invalid, JPG เสีย, DB ล่มแล้ว retry, upload queue, watcher จริง 20 inspection |
 
 ---
@@ -931,7 +934,7 @@ Pipeline      PASS
 | Crash Recovery         | PASS       |
 | Rotating Log + Health  | PASS       |
 | Windows Service script | READY      |
-| Google Drive           | NOT ACTIVE |
+| Google Drive Upload    | READY (ปิดไว้จนกว่าจะเชื่อมบัญชี) |
 | Real IV4 Data          | PENDING    |
 
 ---
@@ -987,40 +990,59 @@ Pipeline      PASS
 
 ---
 
-# 34. Future Online Storage
+# 34. Online Storage — Google Drive
 
-Google Drive / Cloud Storage ยังไม่ได้เปิดใช้งานใน Current Core Pipeline
+> **Google API key ใช้อัปโหลดไม่ได้** (อ่านได้เฉพาะไฟล์ public) ต้องใช้ OAuth หรือ Service Account
 
-เป้าหมายในอนาคต:
+Upload ทำงานใน thread แยกจาก ingestion — เน็ตช้าหรือหลุดจะไม่กระทบการรับข้อมูล
+ส่งเฉพาะ inspection ที่สถานะ `DONE` และยังไม่ upload; ถ้า error จะ retry รอบถัดไป (ไม่เกิดไฟล์ซ้ำใน Drive)
 
-```text
-IV4
- │
- ▼
-Mini PC
- │
- ├───────────────┐
- │               │
- ▼               ▼
-SQLite       Online Storage
- │               │
- │               └── Google Drive
- │
- ▼
-Data Analysis
-```
-
-Online Storage จะสามารถเก็บ:
+โครงสร้างใน Drive:
 
 ```text
-Images
-TXT
-Result TXT
-JSON
-Analysis Result
+IV4 Data Agent/
+└── 2026-10-03/
+    └── 007__20261003T074846246028/
+        ├── 007.jpg
+        ├── 007.txt
+        ├── 007_result.txt
+        └── manifest.json
 ```
 
-โดย Storage Layer จะถูกแยกออกจาก Core Processing เพื่อให้สามารถเปลี่ยน Cloud Provider ได้ในอนาคต
+## 34.1 ตั้งค่าแบบ OAuth (Gmail ส่วนตัว)
+
+1. [Google Cloud Console](https://console.cloud.google.com/) → เปิด **Google Drive API**
+2. **OAuth consent screen** → External → เพิ่ม Gmail ของคุณเป็น *Test user*
+   (หรือ Publish app — ถ้าอยู่ในโหมด Testing token จะหมดอายุทุก 7 วัน)
+3. **Credentials → Create credentials → OAuth client ID → Desktop app** → Download JSON
+4. บันทึกเป็น `credentials/client_secret.json`
+5. บน Mini PC รันครั้งเดียว (เปิด browser ให้ล็อกอิน):
+
+   ```powershell
+   python -m scripts.gdrive_auth --test
+   ```
+
+   ได้ `credentials/token.json` และ folder `IV4 Data Agent` ใน Drive
+6. ตั้ง `.env`: `IV4_UPLOAD_ENABLED=true` แล้ว restart service
+
+Scope ที่ใช้คือ `drive.file` — Agent เห็นและแก้ได้เฉพาะไฟล์ที่ตัวเองสร้าง ไม่เข้าถึงไฟล์อื่นใน Drive
+
+## 34.2 ตั้งค่าแบบ Service Account (Google Workspace)
+
+Service Account ไม่มีพื้นที่ใน My Drive ต้องใช้ **Shared Drive**
+
+```text
+IV4_GDRIVE_AUTH=service_account
+IV4_GDRIVE_CREDENTIALS=credentials/service-account.json
+IV4_GDRIVE_FOLDER_ID=<id ของ folder ใน Shared Drive ที่ share ให้ service account เป็น Content manager>
+```
+
+## 34.3 ตรวจสถานะ
+
+`logs/health.json` → `upload.pending`, `upload.uploaded`, `upload.last_upload_error`
+และ `manifest.json` ของแต่ละ inspection มี `uploaded_at` / `upload_ref` (Drive folder id)
+
+> ไฟล์ใน `credentials/` ห้าม commit (อยู่ใน `.gitignore` แล้ว)
 
 ---
 
@@ -1338,10 +1360,10 @@ KEYENCE IV4 G500CA
 ## Phase 7 — Online Storage
 
 ```text
-[PLANNED]
+[READY — รอเชื่อมบัญชี Google บน Mini PC]
 ```
 
-Google Drive API / Cloud Storage
+Google Drive (OAuth / Service Account) — ดูข้อ 34
 
 ---
 
@@ -1404,7 +1426,7 @@ Realtime Monitoring และ Historical Analysis
 1. **ข้อมูลจริงจาก IV4** — ยืนยันชื่อไฟล์, รูปแบบ TXT, encoding, จำนวนไฟล์ต่อ inspection, ความถี่ (ปรับได้ที่ `.env` + parser)
 2. **Analysis Rules จริง** — threshold ปัจจุบันเป็น mock (`IV4_SCORE_THRESHOLD=90`)
 3. **Retention** — ยังไม่มีการ archive/ลบรูปเก่า; ประเมินขนาดรูป × จำนวนต่อวัน แล้วกำหนดนโยบาย
-4. **Online Storage** — upload queue ถูกเตรียมไว้ (เฉพาะสถานะ DONE) แต่ยังไม่ผูกเข้ากับ service
+4. **Online Storage** — Google Drive พร้อมแล้ว ต้องสร้าง OAuth client + รัน `scripts.gdrive_auth` บน Mini PC (ข้อ 34)
 5. **Multi-camera** — ถ้า IV4 หลายตัวเขียนลง folder เดียวกันด้วยเลขเดียวกัน ต้องแยก folder หรือใส่ prefix กล้องในชื่อไฟล์
 6. Dashboard / Data Analysis
 
@@ -1431,7 +1453,7 @@ Current:
 │ End-to-End Mock Test     ✅          │
 │                                      │
 │ Real IV4 Data            ⏳          │
-│ Google Drive             ⏸️          │
+│ Google Drive             ✅ (รอเชื่อม) │
 │ Data Analysis            🔜          │
 │ Dashboard                🔜          │
 │ Production Deployment    🔜          │

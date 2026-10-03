@@ -146,6 +146,7 @@ def test_database_outage_is_retried_not_quarantined(settings, repo, clock, monke
 
 
 def test_upload_queue_only_takes_done(settings, repo, clock):
+    settings.upload_backend = "mock"
     agent = IV4Agent(settings, repo, clock=clock)
     write_inspection(settings.incoming_dir, "014")
     _scan_until_settled(agent, clock)

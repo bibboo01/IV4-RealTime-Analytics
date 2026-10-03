@@ -2,3 +2,8 @@ pillow==12.3.0
 SQLAlchemy==2.1.1
 typing_extensions==4.16.0
 watchdog==6.0.0
+
+# Google Drive upload (Phase 7)
+google-api-python-client==2.201.0
+google-auth==2.59.1
+google-auth-oauthlib==1.5.0
