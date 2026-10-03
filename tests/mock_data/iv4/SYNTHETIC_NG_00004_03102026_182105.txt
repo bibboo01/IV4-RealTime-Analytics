@@ -1,0 +1,7 @@
+Time and Date	03/10/2026	18:21:05
+Program No.	0
+Trigger No.	304977
+TIME[ms]	37
+Total Status	NG
+Tool01:AI Differentiate	OK	98	
+Tool02:AI Differentiate	NG	12	

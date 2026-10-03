@@ -203,12 +203,14 @@ iv4-data-agent/
 │
 ├── scripts/
 │   ├── backup_db.py
+│   ├── metrics.py           # รายงาน metric / export CSV
 │   ├── gdrive_auth.py       # ล็อกอิน Google Drive ครั้งเดียว
 │   └── stats.py
 │
 ├── tests/
 │   ├── conftest.py
-│   ├── mock_data/
+│   ├── mock_data/           # iv4/ = ไฟล์จริงจาก sensor
+│   ├── test_iv4_real.py
 │   ├── test_parsing.py
 │   ├── test_database.py
 │   ├── test_agent.py
@@ -391,13 +393,14 @@ data/database/iv4.db
 .txt
 ```
 
-Inspection หนึ่งรายการสามารถประกอบด้วย:
+Inspection หนึ่งรายการ (IV4 จริง):
 
 ```text
-001.jpg
-001.txt
-001_result.txt
+00001_03102026_181913.jpg
+00001_03102026_181913.txt
 ```
+
+รูปแบบ mock เดิม (`001.jpg` + `001.txt` + `001_result.txt`) ยังใช้ได้โดยตั้ง `IV4_EXPECTED_TEXTS=2`
 
 ---
 
@@ -496,80 +499,116 @@ STATUS : COMPLETE
 
 ---
 
-# 12. TXT Parser
+# 12. TXT Parser — รูปแบบจริงจาก KEYENCE IV4-G500CA
 
-TXT Parser ทำหน้าที่อ่านข้อมูลจาก TXT และแปลงเป็น Structured Data
-
-ตัวอย่าง:
+ไฟล์จริงจาก FTP (ยืนยันแล้ว 2026-10-03): **1 inspection = รูป 1 + TXT 1** ชื่อเดียวกัน
 
 ```text
-inspection_id=007
-timestamp=2026-09-28 15:00:15
-machine_id=MACHINE_01
-camera_id=CAM_01
-result=OK
-score=97.8
-width=120.1
-height=45.0
+00001_03102026_181913.jpg
+00001_03102026_181913.txt      <ลำดับ>_<DDMMYYYY>_<HHMMSS>
 ```
 
-Parser จะสร้างข้อมูล:
+> เลขลำดับ (`00001`) **รีเซ็ตได้** — ใช้ชื่อไฟล์ทั้งชื่อเป็น Inspection ID และเก็บ `Trigger No.` แยก
+
+เนื้อหา TXT (คั่นด้วย Tab, ASCII, CRLF):
 
 ```text
-inspection_id = '007'
-timestamp     = '2026-09-28 15:00:15'
-machine_id    = 'MACHINE_01'
-camera_id     = 'CAM_01'
-result        = 'OK'
-score         = 97.8
-width         = 120.1
-height        = 45.0
+Time and Date	03/10/2026	18:19:13
+Program No.	0
+Trigger No.	301512
+TIME[ms]	36
+Total Status	OK
+Tool01:AI Differentiate	OK	100
+Tool02:AI Differentiate	OK	100
 ```
+
+Parser ตรวจรูปแบบอัตโนมัติ (IV4 tab / `key=value` แบบ mock เดิม) และแปลงเป็น:
+
+| TXT | Database |
+| --- | --- |
+| ชื่อไฟล์ | `inspection_id` |
+| Time and Date (`IV4_DATE_FORMAT`, default DD/MM/YYYY) | `timestamp` = `2026-10-03 18:19:13` |
+| Program No. | `program_no` |
+| Trigger No. | `trigger_no` |
+| TIME[ms] | `inspection_time_ms` |
+| Total Status | `result` |
+| ToolNN: ชื่อ / สถานะ / ค่า | `tools_json`; `score` = ค่าต่ำสุดของทุก tool; `defect_count` = จำนวน tool ที่ NG |
+| (ตั้งใน `.env`) | `camera_id` = `IV4_SENSOR_ID`, `machine_id` = `IV4_MACHINE_ID` |
+
+บรรทัดที่ไม่รู้จักจะถูกเก็บไว้ใน `raw_data` — ไม่มีข้อมูลหาย
+
+ไฟล์ตัวอย่างจริงอยู่ที่ `tests/mock_data/iv4/`
 
 ---
 
-# 13. Result TXT
+# 13. Analysis Rule (ข้อมูลจริง)
 
-ระบบรองรับ TXT ที่เก็บข้อมูล Result เพิ่มเติม
+ใช้ **ผลตัดสินของ sensor** เป็นหลัก:
 
-ตัวอย่าง:
-
-```text
-result=OK
-defect_count=0
-inspection_time_ms=44
-confidence=0.978
-```
-
-ข้อมูลเหล่านี้จะถูกรวมกับ Inspection Record
+* `Total Status = NG` หรือ tool ใดเป็น NG → **FAIL** (reason ระบุ tool เช่น `Tool02:AI Differentiate NG (value=12)`)
+* OK ทุกอย่าง → **PASS**
+* ไม่มี `Total Status` → **UNKNOWN**
+* เกณฑ์เพิ่มเติม (ปิดไว้): `IV4_SCORE_THRESHOLD` = FAIL ถ้าค่า tool ต่ำสุดน้อยกว่าค่านี้
 
 ---
 
-# 14. Inspection Record
+# 14. ส่งข้อมูลทุกชิ้น (Good + NG) — ความจุและ Metric
 
-Inspection Record เป็นข้อมูลกลางที่รวมข้อมูลจาก TXT ทั้งหมดของ Inspection เดียวกัน
+## 14.1 ผลทดสอบที่อัตราจริง (20 ชิ้น/วินาที, รูป 110 KB)
 
-ตัวอย่าง:
+| ทดสอบ | ผล |
+| --- | --- |
+| 1,801 ชิ้นใน 90 วินาที บน DB ที่มีอยู่แล้ว 100,000 แถว | เข้า DB ครบ 1,801/1,801, ไฟล์ถึง DB median 1.8 s / max 2.1 s, ไม่มี backlog สะสม |
+| ความเร็ว insert ลง DB | ~700 ชิ้น/วินาที (เผื่อ ~35 เท่า) |
+| Upload NG ขนานไปด้วย | ส่งเฉพาะ NG 36/36, ไม่กระทบการรับข้อมูล |
 
-```json
-{
-  "inspection_id": "007",
-  "timestamp": "2026-09-28 15:00:15",
-  "machine_id": "MACHINE_01",
-  "camera_id": "CAM_01",
-  "result": "OK",
-  "score": 97.8,
-  "width": 120.1,
-  "height": 45.0,
-  "defect_count": 0,
-  "inspection_time_ms": 44,
-  "confidence": 0.978,
-  "source_files": [
-    "007.txt",
-    "007_result.txt"
-  ]
-}
+## 14.2 ปริมาณข้อมูล (ต้องวางแผน storage)
+
+| | ต่อวัน (24 ชม.) | ต่อกะ 8 ชม. |
+| --- | --- | --- |
+| รูป | ~190 GB | ~63 GB |
+| Database | ~1 GB | ~0.3 GB |
+
+ตั้ง `IV4_ARCHIVE_DIR` ไปที่ดิสก์ใหญ่/NAS และตั้ง retention เช่น
+
+```text
+IV4_RETENTION_OK_DAYS=3      # รูป OK เก็บ 3 วัน
+IV4_RETENTION_NG_DAYS=180    # รูป NG เก็บ 6 เดือน
+IV4_RETENTION_ROWS_DAYS=90   # แถวรายชิ้นใน DB 90 วัน (metric รายชั่วโมงเก็บตลอด)
 ```
+
+ระบบเตือนเมื่อดิสก์เหลือน้อยกว่า `IV4_MIN_FREE_GB` (log + `health.json` + `healthcheck.ps1`)
+
+## 14.3 โครงสร้างไฟล์
+
+```text
+data/processing/   <- เฉพาะที่กำลังประมวลผล (ปกติว่าง)
+data/archive/
+└── 2026-10-03/          (วันที่ตามเวลา sensor)
+    ├── OK/<uid>/
+    ├── NG/<uid>/
+    └── UNKNOWN/<uid>/
+```
+
+Retention ลบทีละ folder วัน/สถานะ — เร็วและไม่กระทบการรับข้อมูล (ทำใน thread แยก)
+
+## 14.4 Metric สำหรับนำเสนอ
+
+ตาราง `hourly_stats` / `hourly_tool_stats` อัปเดตทุกครั้งที่บันทึก → ดึง metric ได้ทันทีไม่ว่าข้อมูลจะมีกี่ล้านแถว
+
+```powershell
+python -m scripts.metrics                                   # วันนี้ รายชั่วโมง
+python -m scripts.metrics --from 2026-10-01 --to 2026-10-08 --by day --csv week.csv
+```
+
+| Metric | ความหมาย |
+| --- | --- |
+| total / NG / NG % / yield % | นับจากไฟล์ที่ได้รับ |
+| avg ms / max ms | Cycle time จาก `TIME[ms]` |
+| **missing** | `Trigger No.` ที่ sensor นับ แต่ไม่ได้รับไฟล์ — ควรเป็น 0 ถ้า FTP ส่งครบ |
+| NG by tool | Tool ไหนตัด NG เท่าไร, ค่าเฉลี่ย, **lowest OK value** (ระยะห่างก่อนจะเป็น NG) |
+
+> ถ้า `missing` ไม่เป็น 0 แปลว่า sensor/FTP ส่งไม่ทัน — NG % จะคลาดเคลื่อน ต้องแก้ที่การตั้งค่า sensor/เครือข่ายก่อนนำตัวเลขไปใช้
 
 ---
 
@@ -833,6 +872,7 @@ Test ทั้งหมดใช้ temp folder และ temp database — **�
 | --- | --- |
 | `tests/test_parsing.py` | TXT parser (UTF-8/UTF-16/cp874), Inspection Record, Analyzer, Matcher |
 | `tests/test_database.py` | Create/Update, ID ซ้ำเก็บประวัติ, Duplicate hash, Migration จาก v1 |
+| `tests/test_metrics.py` | Metric รายชั่วโมง/วัน, missing จาก Trigger No., NG ตาม Tool, retention, ดิสก์ |
 | `tests/test_google_drive.py` | Upload ลงโครงสร้าง วัน/UID, root folder สร้างครั้งเดียว, เน็ตหลุดแล้ว retry ไม่ซ้ำ, config ผิดไม่ทำให้ service ล่ม |
 | `tests/test_agent.py` | End-to-end: ไฟล์ครบ/ไม่ครบ, counter reset, backlog ตอน startup, timeout, invalid, JPG เสีย, DB ล่มแล้ว retry, upload queue, watcher จริง 20 inspection |
 
@@ -935,7 +975,7 @@ Pipeline      PASS
 | Rotating Log + Health  | PASS       |
 | Windows Service script | READY      |
 | Google Drive Upload    | READY (ปิดไว้จนกว่าจะเชื่อมบัญชี) |
-| Real IV4 Data          | PENDING    |
+| Real IV4 Data          | PASS (5 ไฟล์จริง, OK เท่านั้น) |
 
 ---
 
@@ -1423,8 +1463,8 @@ Realtime Monitoring และ Historical Analysis
 
 ต้องทำก่อนเปิดใช้งานจริงเต็มรูปแบบ:
 
-1. **ข้อมูลจริงจาก IV4** — ยืนยันชื่อไฟล์, รูปแบบ TXT, encoding, จำนวนไฟล์ต่อ inspection, ความถี่ (ปรับได้ที่ `.env` + parser)
-2. **Analysis Rules จริง** — threshold ปัจจุบันเป็น mock (`IV4_SCORE_THRESHOLD=90`)
+1. **ข้อมูลจริงจาก IV4** — ✅ รองรับรูปแบบ TXT จริงแล้ว (ข้อ 12) — ยังต้องยืนยันว่า **ชื่อไฟล์รูปตรงกับ TXT** และขอตัวอย่าง **NG จริง**
+2. **ส่งทุกชิ้น** — ระบบรองรับแล้ว (ข้อ 14) ต้องตั้ง sensor ให้ส่งทุกชิ้น, เตรียม storage และตั้ง retention; ตรวจ `missing` = 0
 3. **Retention** — ยังไม่มีการ archive/ลบรูปเก่า; ประเมินขนาดรูป × จำนวนต่อวัน แล้วกำหนดนโยบาย
 4. **Online Storage** — Google Drive พร้อมแล้ว ต้องสร้าง OAuth client + รัน `scripts.gdrive_auth` บน Mini PC (ข้อ 34)
 5. **Multi-camera** — ถ้า IV4 หลายตัวเขียนลง folder เดียวกันด้วยเลขเดียวกัน ต้องแยก folder หรือใส่ prefix กล้องในชื่อไฟล์

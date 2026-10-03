@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 import signal
 import threading
 import time
@@ -29,7 +30,7 @@ from watchdog.observers.polling import PollingObserver
 
 from app.config import Settings, load_settings
 from app.database.repository import DatabaseRepository
-from app.ingestion.lifecycle import move_files, quarantine
+from app.ingestion.lifecycle import move_files, quarantine, unique_dir
 from app.ingestion.matcher import (
     COMPLETE,
     INVALID,
@@ -50,7 +51,8 @@ from app.ingestion.record import (
     utc_now,
 )
 from app.ingestion.stability import StabilityTracker
-from app.pipeline import PipelineError, run_pipeline
+from app.maintenance import MaintenanceWorker, disk_free_gb
+from app.pipeline import PipelineError, archive_rel_path, run_pipeline
 
 log = logging.getLogger("iv4.agent")
 
@@ -85,6 +87,7 @@ class IV4Agent:
         self.stop_event = threading.Event()
         self.wake = threading.Event()
         self.upload_worker = None
+        self.maintenance = None
         self._last_retry = 0.0
 
         self.stats = {
@@ -228,7 +231,9 @@ class IV4Agent:
         manifest["error"] = None
         manifest["analysis_status"] = result.status
         manifest["database_id"] = result.database_id
+        manifest["archive"] = result.archive_rel
         save_manifest(manifest, folder)
+        self._archive(folder, manifest)
 
         self.stats["processed"] += 1
         key = result.status.lower()
@@ -245,17 +250,41 @@ class IV4Agent:
     # Recovery: processing/ folders left CLAIMED (crash / DB down)
     # ------------------------------------------------------------
 
+    def _archive(self, folder: Path, manifest: dict) -> None:
+        """processing/<uid>/ -> archive/<date>/<OK|NG|UNKNOWN>/<uid>/ (keeps processing/ small)."""
+        rel = manifest.get("archive")
+        if not rel:
+            rel = archive_rel_path(
+                manifest["uid"], manifest.get("analysis_status", "UNKNOWN"), None, manifest.get("created_at")
+            )
+            manifest["archive"] = rel
+            save_manifest(manifest, folder)
+            self.repo.set_folder(manifest["uid"], rel)
+        target = self.settings.archive_dir / rel
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if target.exists():
+                target = unique_dir(target.parent, target.name)
+                rel = str(target.relative_to(self.settings.archive_dir)).replace("\\", "/")
+                self.repo.set_folder(manifest["uid"], rel)
+            shutil.move(str(folder), str(target))
+        except OSError as exc:
+            log.warning("[ARCHIVE] uid=%s will retry: %s", manifest.get("uid"), exc)
+
     def recover_processing(self) -> int:
+        """Finish anything left in processing/ (crash, DB down, archive move failed)."""
         recovered = 0
         for folder in sorted(p for p in self.settings.processing_dir.iterdir() if p.is_dir()):
             manifest = load_manifest(folder)
             if manifest is None:
-                # Legacy (v1) folder or broken manifest: leave it alone but say so once.
-                continue
-            if manifest.get("status") == CLAIMED:
+                continue  # legacy v1 folder / broken manifest: leave untouched
+            status = manifest.get("status")
+            if status == CLAIMED:
                 log.info("[RECOVER] uid=%s", manifest.get("uid"))
                 self._process_folder(folder, manifest)
                 recovered += 1
+            elif status == DONE:
+                self._archive(folder, manifest)
         return recovered
 
     # ------------------------------------------------------------
@@ -278,6 +307,10 @@ class IV4Agent:
             "incoming_files": pending,
             "incoming_dir": str(self.settings.incoming_dir),
             "database": str(self.settings.database_path),
+            "disk_free_gb": disk_free_gb(self.settings.archive_dir),
+            "min_free_gb": self.settings.min_free_gb,
+            "archive_dir": str(self.settings.archive_dir),
+            "maintenance": self.maintenance.stats if self.maintenance else None,
             "upload": (
                 {"enabled": True, "backend": self.settings.upload_backend, **self.upload_worker.stats}
                 if self.upload_worker else {"enabled": False}
@@ -304,7 +337,12 @@ class IV4Agent:
         log.info("Error      : %s", s.error_dir)
         log.info("Database   : %s", s.database_path)
         log.info("Settle     : %.1fs  Group timeout: %.0fs", s.settle_seconds, s.group_timeout)
-        log.info("Upload     : %s", s.upload_backend if s.upload_enabled else "disabled")
+        log.info("Archive    : %s", s.archive_dir)
+        log.info("Retention  : OK=%s NG=%s rows=%s (days, 0=keep)",
+                 s.retention_ok_days, s.retention_ng_days, s.retention_rows_days)
+        log.info("Upload     : %s", (
+            f"{s.upload_backend} ({'ALL' if s.upload_statuses is None else ','.join(sorted(s.upload_statuses))})"
+            if s.upload_enabled else "disabled"))
         log.info("=" * 60)
 
         n = self.recover_processing()
@@ -312,6 +350,9 @@ class IV4Agent:
             log.info("[RECOVER] %d inspection(s) re-processed", n)
 
         observer = self._start_observer()
+
+        self.maintenance = MaintenanceWorker(s, self.stop_event)
+        self.maintenance.start()
 
         if s.upload_enabled:
             from app.upload.queue import UploadWorker
@@ -337,6 +378,8 @@ class IV4Agent:
                 observer.join(timeout=5)
             if self.upload_worker is not None:
                 self.upload_worker.join(timeout=30)
+            if self.maintenance is not None:
+                self.maintenance.join(timeout=30)
             self.write_health()
             self.repo.dispose()
             log.info("IV4 Data Agent stopped")

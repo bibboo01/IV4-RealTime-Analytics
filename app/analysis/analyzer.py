@@ -18,10 +18,10 @@ class AnalysisResult:
     """
     Result produced by the analysis engine.
 
-    NOTE:
-    Rules are currently based on Mock Data. Thresholds are configurable
-    (IV4_SCORE_THRESHOLD / IV4_CONFIDENCE_THRESHOLD) and must be confirmed
-    with real IV4 data and the actual business rules.
+    Default rule: the sensor's own judgement is authoritative
+    (Total Status + per-tool OK/NG). Extra thresholds
+    (IV4_SCORE_THRESHOLD on the lowest tool value, IV4_CONFIDENCE_THRESHOLD)
+    are optional and off by default.
     """
 
     inspection_id: str
@@ -40,7 +40,7 @@ class AnalysisResult:
 
 def analyze_inspection(
     record: InspectionRecord,
-    score_threshold: float | None = 90.0,
+    score_threshold: float | None = None,
     confidence_threshold: float | None = None,
 ) -> AnalysisResult:
 
@@ -51,7 +51,13 @@ def analyze_inspection(
     if result in NG_RESULTS:
         fail_reasons.append(f"Inspection result is {record.result}")
 
-    if record.defect_count is not None and record.defect_count > 0:
+    ng_tools = [t for t in (record.tools or []) if (t.get("status") or "").upper() == "NG"]
+    if ng_tools:
+        for t in ng_tools:
+            fail_reasons.append(
+                f"Tool{t.get('no', 0):02d}:{t.get('name')} NG (value={t.get('value')})"
+            )
+    elif record.defect_count is not None and record.defect_count > 0:
         fail_reasons.append(f"Defect count = {record.defect_count}")
 
     if (

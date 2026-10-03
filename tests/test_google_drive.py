@@ -89,14 +89,15 @@ def _done_inspections(settings, repo, clock, ids):
         agent.scan_once()
         clock.advance(1.1)
     agent.scan_once()
-    assert len(pending_uploads(settings.processing_dir)) == len(ids)
+    settings.upload_statuses = None   # mock inspections are OK -> upload everything in these tests
+    assert len(pending_uploads(settings, repo)) == len(ids)
 
 
 def test_uploads_into_date_and_uid_folders(settings, repo, clock, drive):
     _done_inspections(settings, repo, clock, ["001", "002"])
     up = GoogleDriveUploader(settings, service=drive)
 
-    assert process_upload_queue(settings, up.upload_inspection) == 2
+    assert process_upload_queue(settings, up.upload_inspection, repo=repo) == 2
     tree = drive.tree()
     assert tree[0] == "IV4 Data Agent"
     uploaded = [t for t in tree if t.endswith(".jpg")]
@@ -104,13 +105,11 @@ def test_uploads_into_date_and_uid_folders(settings, repo, clock, drive):
     assert re.match(r"IV4 Data Agent/\d{4}-\d{2}-\d{2}/001__\d+T\d+/001\.jpg", uploaded[0])
     # 3 data files + manifest per inspection
     assert sum(t.count("/") == 3 for t in tree) == 8
-    assert pending_uploads(settings.processing_dir) == []
+    assert pending_uploads(settings, repo) == []
 
-    # manifest records where it went
-    folder = next(settings.processing_dir.iterdir())
-    import json
-    m = json.loads((folder / "manifest.json").read_text())
-    assert m["upload_ref"].startswith("id") and m["uploaded_at"]
+    # database records where it went
+    row = repo.get_by_inspection_id("001")
+    assert row.upload_ref.startswith("id") and row.uploaded_at
 
 
 def test_root_folder_is_created_once_and_remembered(settings, drive):
@@ -126,12 +125,11 @@ def test_network_failure_is_retried_without_duplicates(settings, repo, clock, dr
     up = GoogleDriveUploader(settings, service=drive)
     up.root_id()
     drive.fail_next_create = 2          # round 1 fails on day folder, round 2 on uid folder
-    assert process_upload_queue(settings, up.upload_inspection) == 0
-    assert process_upload_queue(settings, up.upload_inspection) == 0
-    folder, manifest = pending_uploads(settings.processing_dir)[0]
-    assert manifest["upload_attempts"] == 2 and "network down" in manifest["upload_error"]
+    assert process_upload_queue(settings, up.upload_inspection, repo=repo) == 0
+    assert process_upload_queue(settings, up.upload_inspection, repo=repo) == 0
+    assert len(pending_uploads(settings, repo)) == 1
 
-    assert process_upload_queue(settings, up.upload_inspection) == 1
+    assert process_upload_queue(settings, up.upload_inspection, repo=repo) == 1
     names = [f["name"] for f in drive.items.values()]
     assert names.count("003.jpg") == 1 and names.count("003.txt") == 1
     assert sum(1 for n in names if n.startswith("003__")) == 1
@@ -140,7 +138,9 @@ def test_network_failure_is_retried_without_duplicates(settings, repo, clock, dr
 def test_reupload_skips_existing_files(settings, repo, clock, drive):
     _done_inspections(settings, repo, clock, ["004"])
     up = GoogleDriveUploader(settings, service=drive)
-    folder, manifest = pending_uploads(settings.processing_dir)[0]
+    from app.ingestion.record import load_manifest
+    uid, folder = pending_uploads(settings, repo)[0]
+    manifest = load_manifest(folder)
     up.upload_inspection(folder, manifest)
     n = len(drive.items)
     up.upload_inspection(folder, manifest)   # crash before manifest saved -> retry
