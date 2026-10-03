@@ -1,181 +1,121 @@
+"""
+Parser -> Inspection Record -> Analysis -> Database for one claimed
+inspection folder (processing/<uid>/).
+"""
 from __future__ import annotations
 
+import logging
+from dataclasses import dataclass
 from pathlib import Path
 
-from app.parser.inspection_record import (
-    build_inspection_record,
-)
+from app.analysis.analyzer import analyze_inspection
+from app.config import Settings, load_settings
+from app.database.repository import DatabaseRepository
+from app.parser.inspection_record import build_inspection_record
 
-from app.analysis.analyzer import (
-    analyze_inspection,
-)
-
-from app.database.repository import (
-    DatabaseRepository,
-)
+log = logging.getLogger(__name__)
 
 
-BASE_DIR = Path(__file__).resolve().parents[1]
-
-DATABASE_PATH = (
-    BASE_DIR
-    / "data"
-    / "database"
-    / "iv4.db"
-)
+class PipelineError(Exception):
+    def __init__(self, stage: str, message: str):
+        super().__init__(f"{stage}: {message}")
+        self.stage = stage
 
 
-def process_inspection(
-    inspection_id: str,
-    processing_folder: Path,
-) -> str:
+@dataclass
+class PipelineResult:
+    uid: str
+    inspection_id: str
+    status: str            # PASS / FAIL / UNKNOWN
+    action: str            # CREATED / UPDATED / DUPLICATE
+    database_id: int
 
-    inspection_folder = (
-        processing_folder
-        / inspection_id
-    )
 
-    print(
-        f"[PIPELINE] "
-        f"inspection={inspection_id}"
-    )
+def verify_image(path: Path) -> None:
+    try:
+        from PIL import Image
+    except ImportError:  # Pillow optional
+        return
+    try:
+        with Image.open(path) as img:
+            img.verify()
+    except Exception as exc:  # noqa: BLE001
+        raise PipelineError("IMAGE", f"{path.name} is not a valid image ({exc})") from exc
 
-    # --------------------------------------------------
-    # Check inspection folder
-    # --------------------------------------------------
 
-    if not inspection_folder.exists():
+def run_pipeline(
+    folder: Path,
+    manifest: dict,
+    repository: DatabaseRepository,
+    settings: Settings,
+) -> PipelineResult:
 
-        print(
-            f"[PIPELINE ERROR] "
-            f"Folder not found: "
-            f"{inspection_folder}"
-        )
+    uid = manifest["uid"]
+    inspection_id = manifest["inspection_id"]
 
-        return "ERROR"
-
-    # --------------------------------------------------
-    # Step 1: Parser
-    # --------------------------------------------------
-
-    print(
-        f"[PARSER] "
-        f"inspection={inspection_id}"
-    )
+    if settings.verify_images and manifest.get("image"):
+        verify_image(folder / manifest["image"])
 
     try:
+        record = build_inspection_record(folder, inspection_id=inspection_id)
+    except Exception as exc:  # noqa: BLE001
+        raise PipelineError("PARSER", str(exc)) from exc
 
-        record = build_inspection_record(
-            inspection_folder
-        )
-
-    except Exception as exc:
-
-        print(
-            f"[PARSER ERROR] "
-            f"inspection={inspection_id} "
-            f"error={exc}"
-        )
-
-        return "ERROR"
-
-    print(
-        f"  inspection_id = "
-        f"{record.inspection_id}"
-    )
-
-    # --------------------------------------------------
-    # Step 2: Analysis
-    # --------------------------------------------------
-
-    print(
-        f"[ANALYSIS] "
-        f"inspection={inspection_id}"
-    )
+    for w in record.warnings:
+        log.warning("[PARSER] uid=%s %s", uid, w)
 
     try:
-
         analysis = analyze_inspection(
-            record
+            record,
+            score_threshold=settings.score_threshold,
+            confidence_threshold=settings.confidence_threshold,
         )
-
-    except Exception as exc:
-
-        print(
-            f"[ANALYSIS ERROR] "
-            f"inspection={inspection_id} "
-            f"error={exc}"
-        )
-
-        return "ERROR"
-
-    print(
-        f"  status = "
-        f"{analysis.status}"
-    )
-
-    print(
-        f"  score = "
-        f"{analysis.score}"
-    )
-
-    print(
-        f"  confidence = "
-        f"{analysis.confidence}"
-    )
-
-    # --------------------------------------------------
-    # Step 3: Database
-    # --------------------------------------------------
-
-    print(
-        f"[DATABASE] "
-        f"inspection={inspection_id}"
-    )
+    except Exception as exc:  # noqa: BLE001
+        raise PipelineError("ANALYSIS", str(exc)) from exc
 
     try:
-
-        repository = DatabaseRepository(
-            DATABASE_PATH
+        saved, action = repository.save_or_update_inspection(
+            record,
+            analysis,
+            uid=uid,
+            content_hash=manifest.get("content_hash"),
+            image_file=manifest.get("image"),
+            folder=str(folder),
         )
+    except Exception as exc:  # noqa: BLE001
+        raise PipelineError("DATABASE", str(exc)) from exc
 
-        saved, action = (
-            repository.save_or_update_inspection(
-                record,
-                analysis,
-            )
-        )
+    return PipelineResult(
+        uid=uid,
+        inspection_id=record.inspection_id,
+        status=analysis.status,
+        action=action,
+        database_id=saved.id,
+    )
 
-    except Exception as exc:
 
-        print(
-            f"[DATABASE ERROR] "
-            f"inspection={inspection_id} "
-            f"error={exc}"
-        )
-
+def process_inspection(inspection_id: str, processing_folder: Path) -> str:
+    """
+    Backwards-compatible helper used by the old README / scripts:
+    run the pipeline on processing_folder/<inspection_id>/ directly.
+    """
+    settings = load_settings()
+    folder = Path(processing_folder) / inspection_id
+    if not folder.exists():
+        log.error("[PIPELINE ERROR] Folder not found: %s", folder)
         return "ERROR"
-
-    print(
-        f"  action = {action}"
-    )
-
-    print(
-        f"  database_id = {saved.id}"
-    )
-
-    print(
-        f"  status = "
-        f"{saved.analysis_status}"
-    )
-
-    # --------------------------------------------------
-    # Complete
-    # --------------------------------------------------
-
-    print(
-        f"[PIPELINE COMPLETE] "
-        f"inspection={inspection_id}"
-    )
-
-    return "SUCCESS"
+    repo = DatabaseRepository(settings.database_path)
+    try:
+        result = run_pipeline(
+            folder,
+            {"uid": inspection_id, "inspection_id": inspection_id, "image": None},
+            repo,
+            settings,
+        )
+        log.info("[PIPELINE COMPLETE] %s", result)
+        return "SUCCESS"
+    except PipelineError as exc:
+        log.error("[PIPELINE ERROR] %s", exc)
+        return "ERROR"
+    finally:
+        repo.dispose()

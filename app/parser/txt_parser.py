@@ -105,24 +105,34 @@ def parse_txt(file_path: str | Path) -> dict[str, Any]:
 
     data: dict[str, Any] = {}
 
-    with file_path.open(
-        "r",
-        encoding="utf-8",
-        errors="replace",
-    ) as file:
+    for line in read_text_any(file_path).splitlines():
 
-        for line in file:
+        parsed = parse_line(line)
 
-            parsed = parse_line(line)
+        if parsed is None:
+            continue
 
-            if parsed is None:
-                continue
+        key, value = parsed
 
-            key, value = parsed
-
-            data[key] = value
+        data[key] = value
 
     return data
+
+
+def read_text_any(file_path: Path) -> str:
+    """
+    Decode a TXT written by a PLC / sensor / Windows tool.
+
+    Order: UTF-16 (BOM) -> UTF-8 (with/without BOM) -> cp874 (Thai Windows).
+    The real IV4 encoding is not confirmed yet, so be tolerant.
+    """
+    raw = file_path.read_bytes()
+    if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return raw.decode("utf-16")
+    try:
+        return raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return raw.decode("cp874", errors="replace")
 
 
 def parse_inspection_txt(

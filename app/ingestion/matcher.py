@@ -1,257 +1,103 @@
-from pathlib import Path
+"""
+Group incoming files into inspections and decide whether a group is
+complete.
+
+Grouping rule
+-------------
+The group key is the file stem with the result suffix removed:
+
+    007.jpg          -> 007
+    007.txt          -> 007
+    007_result.txt   -> 007
+    CAM1_0001.jpg    -> CAM1_0001     (underscores in the ID are kept)
+
+This replaces the old ``stem.split("_")[0]`` rule, which would have merged
+unrelated inspections as soon as real IV4 filenames contain underscores.
+"""
+from __future__ import annotations
+
 from collections import defaultdict
+from dataclasses import dataclass, field
+from pathlib import Path
 
-from app.ingestion.record import (
-    create_inspection_record,
-    save_record,
-)
+RESULT_SUFFIX = "_result"
 
-from app.ingestion.lifecycle import (
-    move_inspection_files,
-)
-
-IMAGE_EXTENSIONS = {".jpg", ".jpeg"}
-TEXT_EXTENSION = ".txt"
+COMPLETE = "COMPLETE"
+WAITING = "WAITING"
+INVALID = "INVALID"
 
 
 def get_group_id(file_path: Path) -> str:
-    """
-    Extract group ID from filename.
-    """
-    return file_path.stem.split("_")[0]
+    stem = file_path.stem
+    if stem.lower().endswith(RESULT_SUFFIX):
+        stem = stem[: -len(RESULT_SUFFIX)]
+    return stem
 
 
-def find_groups(folder: Path):
-    """
-    Group files by inspection ID.
-    """
-    groups = defaultdict(list)
+def is_result_file(file_path: Path) -> bool:
+    return file_path.stem.lower().endswith(RESULT_SUFFIX)
 
+
+@dataclass
+class GroupStatus:
+    group_id: str
+    status: str
+    image_files: list[Path] = field(default_factory=list)
+    text_files: list[Path] = field(default_factory=list)
+    reason: str = ""
+
+    @property
+    def files(self) -> list[Path]:
+        return sorted(self.image_files + self.text_files)
+
+
+def find_groups(
+    folder: Path,
+    image_ext: frozenset[str],
+    text_ext: frozenset[str],
+) -> dict[str, list[Path]]:
+    groups: dict[str, list[Path]] = defaultdict(list)
     if not folder.exists():
         return groups
-
     for file_path in folder.iterdir():
-
         if not file_path.is_file():
             continue
-
-        extension = file_path.suffix.lower()
-
-        if (
-            extension not in IMAGE_EXTENSIONS
-            and extension != TEXT_EXTENSION
-        ):
+        ext = file_path.suffix.lower()
+        if ext not in image_ext and ext not in text_ext:
             continue
-
-        group_id = get_group_id(file_path)
-
-        groups[group_id].append(file_path)
-
+        groups[get_group_id(file_path)].append(file_path)
     return groups
 
-def validate_group(files: list[Path]) -> dict:
 
-    image_files = [
-        file
-        for file in files
-        if file.suffix.lower()
-        in IMAGE_EXTENSIONS
-    ]
-
-    text_files = [
-        file
-        for file in files
-        if file.suffix.lower()
-        == TEXT_EXTENSION
-    ]
-
-    image_count = len(image_files)
-    text_count = len(text_files)
-
-    if image_count == 1 and text_count == 2:
-
-        status = "COMPLETE"
-
-    elif image_count <= 1 and text_count <= 2:
-
-        status = "WAITING"
-
-    else:
-
-        status = "INVALID"
-
-    return {
-        "status": status,
-        "image_files": image_files,
-        "text_files": text_files,
-        "image_count": image_count,
-        "text_count": text_count,
-    }
-
-def process_group(
+def validate_group(
     group_id: str,
-    incoming_folder: Path,
-    processing_folder: Path,
-):
+    files: list[Path],
+    image_ext: frozenset[str],
+    text_ext: frozenset[str],
+    expected_images: int = 1,
+    expected_texts: int = 2,
+) -> GroupStatus:
+    images = sorted(f for f in files if f.suffix.lower() in image_ext)
+    texts = sorted(f for f in files if f.suffix.lower() in text_ext)
 
-    groups = find_groups(incoming_folder)
+    status = GroupStatus(group_id, WAITING, images, texts)
 
-    files = groups.get(group_id, [])
+    main_texts = [t for t in texts if not is_result_file(t)]
+    result_texts = [t for t in texts if is_result_file(t)]
 
-    if not files:
-
-        print(
-            f"[MATCHER] "
-            f"No files found for group={group_id}"
-        )
-
-        return "WAITING"
-
-    result = validate_group(files)
-
-    print()
-    print(
-        f"[MATCH GROUP] id={group_id}"
-    )
-
-    for file_path in sorted(files):
-
-        print(
-            f"  - {file_path.name}"
-        )
-
-    print(
-        f"  Images : "
-        f"{result['image_count']}"
-    )
-
-    print(
-        f"  Texts  : "
-        f"{result['text_count']}"
-    )
-
-    print(
-        f"  STATUS : "
-        f"{result['status']}"
-    )
-
-    # -----------------------------------------
-    # Not complete yet
-    # -----------------------------------------
-
-    if result["status"] != "COMPLETE":
-
-        return "WAITING"
-
-    # -----------------------------------------
-    # Check if already processed
-    # -----------------------------------------
-
-    inspection_folder = (
-        processing_folder /
-        group_id
-    )
-
-    record_file = (
-        inspection_folder /
-        f"{group_id}.json"
-    )
-
-    if record_file.exists():
-
-        print(
-            f"  [SKIP] "
-            f"Record already exists: "
-            f"{group_id}.json"
-        )
-
-        return "SKIP"
-
-    # -----------------------------------------
-    # Create processing folder
-    # -----------------------------------------
-
-    inspection_folder.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    # -----------------------------------------
-    # Move files
-    # -----------------------------------------
-
-    moved_files = move_inspection_files(
-        files=files,
-        destination=inspection_folder,
-    )
-
-    print(
-        f"  [MOVED] "
-        f"{len(moved_files)} files"
-    )
-
-    # -----------------------------------------
-    # Update paths
-    # -----------------------------------------
-
-    image_file = (
-        inspection_folder /
-        result["image_files"][0].name
-    )
-
-    text_files = [
-        inspection_folder /
-        file.name
-        for file in result["text_files"]
-    ]
-
-    # -----------------------------------------
-    # Create record
-    # -----------------------------------------
-
-    record = create_inspection_record(
-        inspection_id=group_id,
-        image_file=image_file,
-        text_files=text_files,
-        status="COMPLETE",
-    )
-
-    save_record(
-        record,
-        inspection_folder,
-    )
-
-    print(
-        f"  [RECORD CREATED] "
-        f"{group_id}.json"
-    )
-
-    return "COMPLETE"
-
-if __name__ == "__main__":
-
-    base_dir = Path(__file__).resolve().parents[2]
-
-    incoming_folder = (
-        base_dir /
-        "data" /
-        "incoming"
-    )
-
-    processing_folder = (
-        base_dir /
-        "data" /
-        "processing"
-    )
-
-    print("=" * 60)
-    print("IV4 File Matcher")
-    print("=" * 60)
-    print(f"Incoming  : {incoming_folder}")
-    print(f"Processing: {processing_folder}")
-    print("=" * 60)
-
-    process_groups(
-        incoming_folder,
-        processing_folder,
-    )
+    if len(images) > expected_images:
+        status.status = INVALID
+        status.reason = f"too many images ({len(images)} > {expected_images})"
+    elif len(texts) > expected_texts:
+        status.status = INVALID
+        status.reason = f"too many text files ({len(texts)} > {expected_texts})"
+    elif len(main_texts) > 1 or len(result_texts) > 1:
+        status.status = INVALID
+        status.reason = "duplicate main/result text file"
+    elif len(images) == expected_images and len(texts) == expected_texts:
+        if expected_texts >= 1 and not main_texts:
+            status.status = INVALID
+            status.reason = "main TXT missing"
+        else:
+            status.status = COMPLETE
+    return status

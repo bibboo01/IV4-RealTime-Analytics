@@ -1,4 +1,0 @@
-result=OK
-defect_count=0
-inspection_time_ms=42
-confidence=0.985
