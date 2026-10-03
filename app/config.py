@@ -55,6 +55,17 @@ class Settings:
     score_threshold: float = 90.0
     confidence_threshold: float | None = None
 
+    # Online storage (Phase 7)
+    upload_enabled: bool = False
+    upload_backend: str = "gdrive"      # gdrive | mock
+    upload_interval: float = 30.0       # seconds between upload rounds
+    upload_batch: int = 50              # max inspections per round
+    gdrive_auth: str = "oauth"          # oauth (personal Gmail) | service_account (Shared Drive)
+    gdrive_credentials: Path | None = None   # client_secret.json or service-account.json
+    gdrive_token: Path | None = None         # OAuth refresh token (created by scripts.gdrive_auth)
+    gdrive_folder_id: str = ""          # optional; empty = app creates its own root folder
+    gdrive_root_name: str = "IV4 Data Agent"
+
     # Logging
     log_level: str = "INFO"
     log_max_bytes: int = 10 * 1024 * 1024
@@ -113,6 +124,15 @@ def load_settings(
         use_polling=get("USE_POLLING", "false").lower() in {"1", "true", "yes"},
         score_threshold=float(get("SCORE_THRESHOLD", "90")),
         confidence_threshold=float(conf_th) if conf_th else None,
+        upload_enabled=get("UPLOAD_ENABLED", "false").lower() in {"1", "true", "yes"},
+        upload_backend=get("UPLOAD_BACKEND", "gdrive").lower(),
+        upload_interval=float(get("UPLOAD_INTERVAL", "30")),
+        upload_batch=int(get("UPLOAD_BATCH", "50")),
+        gdrive_auth=get("GDRIVE_AUTH", "oauth").lower(),
+        gdrive_credentials=_path(get("GDRIVE_CREDENTIALS", "credentials/client_secret.json"), base),
+        gdrive_token=_path(get("GDRIVE_TOKEN", "credentials/token.json"), base),
+        gdrive_folder_id=get("GDRIVE_FOLDER_ID", ""),
+        gdrive_root_name=get("GDRIVE_ROOT_NAME", "IV4 Data Agent"),
         log_level=get("LOG_LEVEL", "INFO").upper(),
         log_max_bytes=int(get("LOG_MAX_BYTES", str(10 * 1024 * 1024))),
         log_backup_count=int(get("LOG_BACKUP_COUNT", "10")),

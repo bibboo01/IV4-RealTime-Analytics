@@ -84,6 +84,7 @@ class IV4Agent:
 
         self.stop_event = threading.Event()
         self.wake = threading.Event()
+        self.upload_worker = None
         self._last_retry = 0.0
 
         self.stats = {
@@ -277,6 +278,10 @@ class IV4Agent:
             "incoming_files": pending,
             "incoming_dir": str(self.settings.incoming_dir),
             "database": str(self.settings.database_path),
+            "upload": (
+                {"enabled": True, "backend": self.settings.upload_backend, **self.upload_worker.stats}
+                if self.upload_worker else {"enabled": False}
+            ),
         }
         path = self.settings.log_dir / "health.json"
         tmp = path.with_suffix(".tmp")
@@ -299,6 +304,7 @@ class IV4Agent:
         log.info("Error      : %s", s.error_dir)
         log.info("Database   : %s", s.database_path)
         log.info("Settle     : %.1fs  Group timeout: %.0fs", s.settle_seconds, s.group_timeout)
+        log.info("Upload     : %s", s.upload_backend if s.upload_enabled else "disabled")
         log.info("=" * 60)
 
         n = self.recover_processing()
@@ -306,6 +312,12 @@ class IV4Agent:
             log.info("[RECOVER] %d inspection(s) re-processed", n)
 
         observer = self._start_observer()
+
+        if s.upload_enabled:
+            from app.upload.queue import UploadWorker
+
+            self.upload_worker = UploadWorker(s, self.stop_event)
+            self.upload_worker.start()
 
         try:
             while not self.stop_event.is_set():
@@ -323,6 +335,8 @@ class IV4Agent:
             if observer is not None:
                 observer.stop()
                 observer.join(timeout=5)
+            if self.upload_worker is not None:
+                self.upload_worker.join(timeout=30)
             self.write_health()
             self.repo.dispose()
             log.info("IV4 Data Agent stopped")
