@@ -59,6 +59,7 @@ def settings(tmp_path):
             "IV4_SETTLE_SECONDS": "1.0",
             "IV4_GROUP_TIMEOUT": "60",
             "IV4_SCAN_INTERVAL": "0.1",
+            "IV4_EXPECTED_TEXTS": "2",      # old mock layout: <id>.txt + <id>_result.txt
         },
     )
     s.ensure_dirs()

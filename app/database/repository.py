@@ -25,7 +25,7 @@ from app.parser.inspection_record import InspectionRecord
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def _utcnow() -> datetime:
@@ -62,6 +62,12 @@ class Inspection(Base):
     defect_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     inspection_time_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # KEYENCE IV4
+    program_no: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    trigger_no: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    tools_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_format: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     analysis_status: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
     analysis_reason: Mapped[str | None] = mapped_column(String(1000), nullable=True)
@@ -100,6 +106,7 @@ class DatabaseRepository:
 
         self._migrate_legacy()
         Base.metadata.create_all(self.engine)
+        self._add_missing_columns()
         with self.engine.begin() as conn:
             conn.execute(text(f"PRAGMA user_version={SCHEMA_VERSION}"))
 
@@ -137,6 +144,23 @@ class DatabaseRepository:
                     created_at, created_at
                 FROM {legacy}
             """))
+
+    def _add_missing_columns(self) -> None:
+        """v2 -> v3+: add new nullable columns in place (SQLite ALTER TABLE ADD COLUMN)."""
+        existing = {c["name"] for c in inspect(self.engine).get_columns("inspection")}
+        table = Base.metadata.tables["inspection"]
+        with self.engine.begin() as conn:
+            for col in table.columns:
+                if col.name in existing:
+                    continue
+                coltype = col.type.compile(dialect=self.engine.dialect)
+                conn.execute(text(f'ALTER TABLE inspection ADD COLUMN "{col.name}" {coltype}'))
+                log.warning("[DB] added column %s", col.name)
+            for idx in table.indexes:
+                conn.execute(text(
+                    f'CREATE INDEX IF NOT EXISTS "{idx.name}" ON inspection '
+                    f'({", ".join(c.name for c in idx.columns)})'
+                ))
 
     # --------------------------------------------------------
     # Write
@@ -177,6 +201,10 @@ class DatabaseRepository:
             folder=folder,
             raw_data=json.dumps(record.raw, ensure_ascii=False, default=str),
             parse_warnings="; ".join(record.warnings) or None,
+            program_no=record.program_no,
+            trigger_no=record.trigger_no,
+            tools_json=json.dumps(record.tools, ensure_ascii=False) if record.tools else None,
+            source_format=record.source_format,
         )
 
         with Session(self.engine, expire_on_commit=False) as session:

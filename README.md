@@ -208,7 +208,8 @@ iv4-data-agent/
 │
 ├── tests/
 │   ├── conftest.py
-│   ├── mock_data/
+│   ├── mock_data/           # iv4/ = ไฟล์จริงจาก sensor
+│   ├── test_iv4_real.py
 │   ├── test_parsing.py
 │   ├── test_database.py
 │   ├── test_agent.py
@@ -391,13 +392,14 @@ data/database/iv4.db
 .txt
 ```
 
-Inspection หนึ่งรายการสามารถประกอบด้วย:
+Inspection หนึ่งรายการ (IV4 จริง):
 
 ```text
-001.jpg
-001.txt
-001_result.txt
+00001_03102026_181913.jpg
+00001_03102026_181913.txt
 ```
+
+รูปแบบ mock เดิม (`001.jpg` + `001.txt` + `001_result.txt`) ยังใช้ได้โดยตั้ง `IV4_EXPECTED_TEXTS=2`
 
 ---
 
@@ -496,80 +498,65 @@ STATUS : COMPLETE
 
 ---
 
-# 12. TXT Parser
+# 12. TXT Parser — รูปแบบจริงจาก KEYENCE IV4-G500CA
 
-TXT Parser ทำหน้าที่อ่านข้อมูลจาก TXT และแปลงเป็น Structured Data
-
-ตัวอย่าง:
+ไฟล์จริงจาก FTP (ยืนยันแล้ว 2026-10-03): **1 inspection = รูป 1 + TXT 1** ชื่อเดียวกัน
 
 ```text
-inspection_id=007
-timestamp=2026-09-28 15:00:15
-machine_id=MACHINE_01
-camera_id=CAM_01
-result=OK
-score=97.8
-width=120.1
-height=45.0
+00001_03102026_181913.jpg
+00001_03102026_181913.txt      <ลำดับ>_<DDMMYYYY>_<HHMMSS>
 ```
 
-Parser จะสร้างข้อมูล:
+> เลขลำดับ (`00001`) **รีเซ็ตได้** — ใช้ชื่อไฟล์ทั้งชื่อเป็น Inspection ID และเก็บ `Trigger No.` แยก
+
+เนื้อหา TXT (คั่นด้วย Tab, ASCII, CRLF):
 
 ```text
-inspection_id = '007'
-timestamp     = '2026-09-28 15:00:15'
-machine_id    = 'MACHINE_01'
-camera_id     = 'CAM_01'
-result        = 'OK'
-score         = 97.8
-width         = 120.1
-height        = 45.0
+Time and Date	03/10/2026	18:19:13
+Program No.	0
+Trigger No.	301512
+TIME[ms]	36
+Total Status	OK
+Tool01:AI Differentiate	OK	100
+Tool02:AI Differentiate	OK	100
 ```
+
+Parser ตรวจรูปแบบอัตโนมัติ (IV4 tab / `key=value` แบบ mock เดิม) และแปลงเป็น:
+
+| TXT | Database |
+| --- | --- |
+| ชื่อไฟล์ | `inspection_id` |
+| Time and Date (`IV4_DATE_FORMAT`, default DD/MM/YYYY) | `timestamp` = `2026-10-03 18:19:13` |
+| Program No. | `program_no` |
+| Trigger No. | `trigger_no` |
+| TIME[ms] | `inspection_time_ms` |
+| Total Status | `result` |
+| ToolNN: ชื่อ / สถานะ / ค่า | `tools_json`; `score` = ค่าต่ำสุดของทุก tool; `defect_count` = จำนวน tool ที่ NG |
+| (ตั้งใน `.env`) | `camera_id` = `IV4_SENSOR_ID`, `machine_id` = `IV4_MACHINE_ID` |
+
+บรรทัดที่ไม่รู้จักจะถูกเก็บไว้ใน `raw_data` — ไม่มีข้อมูลหาย
+
+ไฟล์ตัวอย่างจริงอยู่ที่ `tests/mock_data/iv4/`
 
 ---
 
-# 13. Result TXT
+# 13. Analysis Rule (ข้อมูลจริง)
 
-ระบบรองรับ TXT ที่เก็บข้อมูล Result เพิ่มเติม
+ใช้ **ผลตัดสินของ sensor** เป็นหลัก:
 
-ตัวอย่าง:
-
-```text
-result=OK
-defect_count=0
-inspection_time_ms=44
-confidence=0.978
-```
-
-ข้อมูลเหล่านี้จะถูกรวมกับ Inspection Record
+* `Total Status = NG` หรือ tool ใดเป็น NG → **FAIL** (reason ระบุ tool เช่น `Tool02:AI Differentiate NG (value=12)`)
+* OK ทุกอย่าง → **PASS**
+* ไม่มี `Total Status` → **UNKNOWN**
+* เกณฑ์เพิ่มเติม (ปิดไว้): `IV4_SCORE_THRESHOLD` = FAIL ถ้าค่า tool ต่ำสุดน้อยกว่าค่านี้
 
 ---
 
-# 14. Inspection Record
+# 14. ข้อจำกัดของ FTP Output
 
-Inspection Record เป็นข้อมูลกลางที่รวมข้อมูลจาก TXT ทั้งหมดของ Inspection เดียวกัน
+จากไฟล์ตัวอย่าง `Trigger No.` เพิ่มทีละ ~500 ใน ~25 วินาที (sensor ตรวจ ~20 ชิ้น/วินาที, 36 ms/ชิ้น)
+แต่ไฟล์ที่ได้ผ่าน FTP มีเพียงบางส่วน → **Database ไม่ได้บันทึกทุกชิ้นงาน** อัตรา PASS/FAIL จาก DB จึงเป็นตัวอย่าง ไม่ใช่ยอดผลิตจริง
 
-ตัวอย่าง:
-
-```json
-{
-  "inspection_id": "007",
-  "timestamp": "2026-09-28 15:00:15",
-  "machine_id": "MACHINE_01",
-  "camera_id": "CAM_01",
-  "result": "OK",
-  "score": 97.8,
-  "width": 120.1,
-  "height": 45.0,
-  "defect_count": 0,
-  "inspection_time_ms": 44,
-  "confidence": 0.978,
-  "source_files": [
-    "007.txt",
-    "007_result.txt"
-  ]
-}
-```
+ถ้าต้องการนับทุกชิ้น: ตรวจการตั้งค่าเงื่อนไขการบันทึกภาพ/FTP ใน IV-SmartNavigator หรือรับผลทุกชิ้นผ่าน Ethernet/TCP แยก แล้วใช้ FTP เก็บเฉพาะรูป (เช่นเฉพาะ NG)
 
 ---
 
@@ -935,7 +922,7 @@ Pipeline      PASS
 | Rotating Log + Health  | PASS       |
 | Windows Service script | READY      |
 | Google Drive Upload    | READY (ปิดไว้จนกว่าจะเชื่อมบัญชี) |
-| Real IV4 Data          | PENDING    |
+| Real IV4 Data          | PASS (5 ไฟล์จริง, OK เท่านั้น) |
 
 ---
 
@@ -1423,8 +1410,8 @@ Realtime Monitoring และ Historical Analysis
 
 ต้องทำก่อนเปิดใช้งานจริงเต็มรูปแบบ:
 
-1. **ข้อมูลจริงจาก IV4** — ยืนยันชื่อไฟล์, รูปแบบ TXT, encoding, จำนวนไฟล์ต่อ inspection, ความถี่ (ปรับได้ที่ `.env` + parser)
-2. **Analysis Rules จริง** — threshold ปัจจุบันเป็น mock (`IV4_SCORE_THRESHOLD=90`)
+1. **ข้อมูลจริงจาก IV4** — ✅ รองรับรูปแบบ TXT จริงแล้ว (ข้อ 12) — ยังต้องยืนยันว่า **ชื่อไฟล์รูปตรงกับ TXT** และขอตัวอย่าง **NG จริง**
+2. **ยอดผลิตไม่ครบ** — FTP ส่งเพียงบางส่วนของชิ้นงาน (ข้อ 14)
 3. **Retention** — ยังไม่มีการ archive/ลบรูปเก่า; ประเมินขนาดรูป × จำนวนต่อวัน แล้วกำหนดนโยบาย
 4. **Online Storage** — Google Drive พร้อมแล้ว ต้องสร้าง OAuth client + รัน `scripts.gdrive_auth` บน Mini PC (ข้อ 34)
 5. **Multi-camera** — ถ้า IV4 หลายตัวเขียนลง folder เดียวกันด้วยเลขเดียวกัน ต้องแยก folder หรือใส่ prefix กล้องในชื่อไฟล์

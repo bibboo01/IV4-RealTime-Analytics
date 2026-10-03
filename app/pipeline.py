@@ -57,7 +57,13 @@ def run_pipeline(
         verify_image(folder / manifest["image"])
 
     try:
-        record = build_inspection_record(folder, inspection_id=inspection_id)
+        record = build_inspection_record(
+            folder,
+            inspection_id=inspection_id,
+            date_format=settings.date_format,
+            machine_id=settings.machine_id,
+            camera_id=settings.sensor_id,
+        )
     except Exception as exc:  # noqa: BLE001
         raise PipelineError("PARSER", str(exc)) from exc
 

@@ -47,12 +47,17 @@ class Settings:
     settle_seconds: float = 1.5         # file size/mtime must be unchanged this long
     group_timeout: float = 120.0        # incomplete group -> error after this
     expected_images: int = 1
-    expected_texts: int = 2
+    expected_texts: int = 1             # real IV4: 1 image + 1 result TXT
     verify_images: bool = True          # open JPG with Pillow to catch truncation
     use_polling: bool = False           # True for network shares (SMB) where events are unreliable
 
-    # Analysis thresholds (mock rules until real IV4 rules arrive)
-    score_threshold: float = 90.0
+    # IV4 source
+    date_format: str = "%d/%m/%Y"       # 'Time and Date' in the TXT (03/10/2026 = 3 Oct)
+    sensor_id: str | None = None        # stored as camera_id (TXT has no sensor id)
+    machine_id: str | None = None
+
+    # Optional extra thresholds (sensor judgement is used by default)
+    score_threshold: float | None = None
     confidence_threshold: float | None = None
 
     # Online storage (Phase 7)
@@ -119,10 +124,13 @@ def load_settings(
         settle_seconds=float(get("SETTLE_SECONDS", "1.5")),
         group_timeout=float(get("GROUP_TIMEOUT", "120")),
         expected_images=int(get("EXPECTED_IMAGES", "1")),
-        expected_texts=int(get("EXPECTED_TEXTS", "2")),
+        expected_texts=int(get("EXPECTED_TEXTS", "1")),
         verify_images=get("VERIFY_IMAGES", "true").lower() in {"1", "true", "yes"},
         use_polling=get("USE_POLLING", "false").lower() in {"1", "true", "yes"},
-        score_threshold=float(get("SCORE_THRESHOLD", "90")),
+        date_format=get("DATE_FORMAT", "%d/%m/%Y"),
+        sensor_id=get("SENSOR_ID", "IV4-01") or None,
+        machine_id=get("MACHINE_ID", "") or None,
+        score_threshold=float(get("SCORE_THRESHOLD", "")) if get("SCORE_THRESHOLD", "") else None,
         confidence_threshold=float(conf_th) if conf_th else None,
         upload_enabled=get("UPLOAD_ENABLED", "false").lower() in {"1", "true", "yes"},
         upload_backend=get("UPLOAD_BACKEND", "gdrive").lower(),

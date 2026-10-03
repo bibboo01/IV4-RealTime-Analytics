@@ -72,7 +72,7 @@ def test_analyzer_pass():
 
 
 def test_analyzer_fail_collects_all_reasons():
-    a = analyze_inspection(_rec(result="NG", defect_count=2, score=50))
+    a = analyze_inspection(_rec(result="NG", defect_count=2, score=50), score_threshold=90)
     assert a.status == FAIL
     assert len(a.reasons) == 3
 

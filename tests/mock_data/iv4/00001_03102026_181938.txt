@@ -1,0 +1,7 @@
+Time and Date	03/10/2026	18:19:38
+Program No.	0
+Trigger No.	302012
+TIME[ms]	36
+Total Status	OK
+Tool01:AI Differentiate	OK	100	
+Tool02:AI Differentiate	OK	100	
