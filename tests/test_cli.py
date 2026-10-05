@@ -180,3 +180,34 @@ def test_monitor_once_shows_today_tools_ng_and_alerts(settings, capsys):
     assert "Tool02 AI Differentiate" in out and "00042_x" in out
     assert "Tool02:AI Differentiate NG (value=12)" in out and "Inspection result is" not in out
     assert "IV4-02: 10 inspections missing this hour" in out
+
+
+def test_gdrive_logout_forgets_account_files(settings, capsys, monkeypatch):
+    import scripts.gdrive_auth as ga
+    monkeypatch.setattr(ga, "load_settings", lambda: settings)      # never touch the real credentials/
+    settings.gdrive_token.parent.mkdir(parents=True, exist_ok=True)
+    for f in ga.state_files(settings):
+        f.write_text("{}")
+    other = settings.gdrive_token.parent / "client_secret.json"
+    other.write_text("{}")
+    assert cli.COMMANDS["gdrive-logout"]([], settings) == 0
+    assert not any(f.exists() for f in ga.state_files(settings))
+    assert other.exists()                                    # the app's own client file is kept
+    out = capsys.readouterr().out
+    assert "token.json" in out and "sheets_state.json" in out
+
+
+def test_gdrive_switch_refuses_while_agent_runs(settings, capsys, monkeypatch):
+    import scripts.gdrive_auth as ga
+    monkeypatch.setattr(ga, "load_settings", lambda: settings)
+    settings.gdrive_token.parent.mkdir(parents=True, exist_ok=True)
+    settings.gdrive_token.write_text("{}")
+    lock = cli.InstanceLock(settings.log_dir)
+    assert lock.acquire()
+    try:
+        assert cli.COMMANDS["gdrive-switch"](["--test"], settings) == 1
+    finally:
+        lock.release()
+    assert settings.gdrive_token.exists()                    # nothing deleted
+    assert "Stop it first" in capsys.readouterr().out
+    assert ga.state_files(settings)[0] == settings.gdrive_token

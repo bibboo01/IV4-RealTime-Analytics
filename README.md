@@ -878,6 +878,8 @@ run
 | `run metrics --by day --per-sensor` | รายงาน metric (`run metrics --help`) |
 | `run benchmark` | วัดว่าเครื่องนี้รองรับได้กี่ sensor |
 | `run gdrive-auth` | ล็อกอิน Google Drive ครั้งเดียว |
+| `run gdrive-switch` | เปลี่ยน Gmail: ลืมบัญชีเก่า แล้วล็อกอินใหม่ (หยุด agent ก่อน) |
+| `run gdrive-logout` | ลืมบัญชี Google ที่ล็อกอินไว้ |
 | `run sheets` | สร้าง/อัปเดต Google Sheets Dashboard หนึ่งครั้ง แล้วแสดงลิงก์ |
 | `run backup` | สำรอง database |
 | `run test` | รัน automated tests |
@@ -944,6 +946,7 @@ agent อัปเดต Google Sheet ชื่อ **IV4 Dashboard** (อยู�
 5. แชร์: กด Share ใน Google Sheets ตามปกติ
 
 * ใช้สิทธิ์เดิม (`drive.file`) ไม่ต้องล็อกอินใหม่ agent เห็นเฉพาะ Sheet ที่ตัวเองสร้าง
+* **เปลี่ยน Gmail:** หยุด agent แล้วรัน `run gdrive-switch --test` (ลบ token และ id โฟลเดอร์/Sheet ของบัญชีเก่า แล้วให้ล็อกอินใหม่ พร้อมแสดงว่าล็อกอินด้วยบัญชีอะไร) ไฟล์ที่อัปโหลดไปแล้วยังอยู่ใน Drive ของบัญชีเก่า ถ้ายังอยู่ในโหมด Testing ต้องเพิ่ม Gmail ใหม่เป็น Test user ก่อน
 * ถ้าลบ Sheet ทิ้ง agent จะสร้างใหม่ให้เองรอบถัดไป (ลิงก์เปลี่ยน) ถ้าอยากย้ายหรือเปลี่ยนชื่อไฟล์ ทำได้ตามปกติ ลิงก์ไม่เปลี่ยน
 * ดูสถานะที่ `run monitor` บรรทัด `Sheets` ถ้ามี error จะขึ้นใน ALERTS เช่น ยังไม่ได้เปิด Sheets API
 * **ตรวจนโยบายบริษัทก่อน** ว่าอนุญาตให้ส่งยอดผลิตขึ้น Google ได้
