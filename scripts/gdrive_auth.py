@@ -44,7 +44,14 @@ def main() -> None:
                 "(A Google API key cannot upload to Drive.)"
             )
         flow = InstalledAppFlow.from_client_secrets_file(str(s.gdrive_credentials), OAUTH_SCOPES)
-        creds = flow.run_local_server(port=0, open_browser=not args.no_browser)
+        print("Waiting for Google sign-in in the browser (open the URL below on THIS computer;\n"
+              "keep this window open until 'Saved token' appears, Ctrl+C cancels).\n")
+        try:
+            creds = flow.run_local_server(
+                port=0, open_browser=not args.no_browser,
+                success_message="IV4 Data Agent: sign-in complete. You can close this tab.")
+        except KeyboardInterrupt:
+            raise SystemExit("Sign-in cancelled - nothing saved. Run: run gdrive-auth --test")
         s.gdrive_token.parent.mkdir(parents=True, exist_ok=True)
         s.gdrive_token.write_text(creds.to_json(), encoding="utf-8")
         print(f"Saved token -> {s.gdrive_token}")
