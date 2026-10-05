@@ -217,10 +217,13 @@ def render(snap: Snapshot, st: Style, width: int = 80, interval: float | None = 
         up = h.get("upload") or {}
         if up.get("enabled"):
             pend = up.get("pending", 0)
-            parts.append(f"Upload {up.get('backend')}: {_n(up.get('uploaded', 0))} sent, {_n(pend)} pending"
+            only = "all" if up.get("statuses") is None else "+".join(up["statuses"])
+            parts.append(f"Upload {up.get('backend')} ({only}): {_n(up.get('uploaded', 0))} sent, {_n(pend)} pending"
                          + (st.red(" ERR") if up.get("last_upload_error") else ""))
             if up.get("last_upload_error"):
-                alerts.append(f"upload: {up['last_upload_error'][:w - 20]}")
+                alerts.append(f"upload: {up['last_upload_error'][:w - 20]}   (run upload = diagnosis)")
+        else:
+            parts.append("Upload " + st.yellow("OFF") + " (IV4_UPLOAD_ENABLED=false)")
         add("     ".join(parts))
         sh = h.get("sheets") or {}
         if sh.get("enabled"):
