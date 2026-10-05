@@ -130,12 +130,12 @@ def test_identical_redrop_is_flagged_duplicate(settings, repo, clock):
 
 def test_database_outage_is_retried_not_quarantined(settings, repo, clock, monkeypatch):
     agent = IV4Agent(settings, repo, clock=clock)
-    real = repo.save_or_update_inspection
+    real = repo.save_batch
 
     def boom(*a, **k):
         raise RuntimeError("database is locked")
 
-    monkeypatch.setattr(repo, "save_or_update_inspection", boom)
+    monkeypatch.setattr(repo, "save_batch", boom)
     write_inspection(settings.incoming_dir, "013")
     _scan_until_settled(agent, clock)
     assert repo.count() == 0
@@ -143,7 +143,7 @@ def test_database_outage_is_retried_not_quarantined(settings, repo, clock, monke
     (folder,) = _dirs(settings.processing_dir)
     assert load_manifest(settings.processing_dir / folder)["status"] == "CLAIMED"
 
-    monkeypatch.setattr(repo, "save_or_update_inspection", real)
+    monkeypatch.setattr(repo, "save_batch", real)
     assert agent.recover_processing() == 1         # same path used on restart
     assert repo.count() == 1
     assert _dirs(settings.processing_dir) == []
@@ -210,3 +210,28 @@ def test_real_watcher_loop(settings, repo):
         agent.stop()
         t.join(timeout=10)
     assert not t.is_alive()
+
+
+def test_lost_manifest_is_rebuilt_on_recovery(settings, repo, clock, monkeypatch):
+    """Power loss right after claim: files in processing/, manifest.json empty."""
+    agent = IV4Agent(settings, repo, clock=clock)
+    monkeypatch.setattr(agent, "_process_claimed", lambda items: None)   # crash after claim
+    write_inspection(settings.incoming_dir, "018")
+    _scan_until_settled(agent, clock)
+    (folder,) = _dirs(settings.processing_dir)
+    (settings.processing_dir / folder / "manifest.json").write_text("")  # truncated by power loss
+    monkeypatch.undo()
+    assert agent.recover_processing() == 1
+    assert repo.get_by_inspection_id("018").analysis_status == "PASS"
+    assert _dirs(settings.processing_dir) == []
+
+
+def test_batch_with_one_bad_file_keeps_the_rest(settings, repo, clock):
+    agent = IV4Agent(settings, repo, clock=clock)
+    for i in range(10):
+        write_inspection(settings.incoming_dir, f"b{i:02d}")
+    (settings.incoming_dir / "b05.jpg").write_bytes(b"\xff\xd8 broken")
+    _scan_until_settled(agent, clock)
+    assert repo.count() == 9
+    assert len(_dirs(settings.error_dir)) == 1
+    assert agent.stats["processed"] == 9 and agent.stats["errors"] == 1

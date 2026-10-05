@@ -158,3 +158,61 @@ def test_archive_dirs_are_dated(settings, repo, clock):
         clock.advance(1.1)
     assert (settings.archive_dir / "2026-09-01" / "OK" / "08").is_dir()
     shutil.rmtree(settings.archive_dir)
+
+
+# ---------------- bulk batch path must equal the row-by-row path ----------------
+
+def _items(recs):
+    return [dict(record=r, analysis=analyze_inspection(r), uid=f"u{r.trigger_no}_{i}",
+                 content_hash=f"h{r.trigger_no}_{i}") for i, r in enumerate(recs)]
+
+
+def _snapshot(repo):
+    from sqlalchemy import text
+    with repo.engine.connect() as c:
+        h = c.execute(text("SELECT * FROM hourly_stats ORDER BY 1,2,3")).all()
+        t = c.execute(text("SELECT * FROM hourly_tool_stats ORDER BY 1,2,3,4")).all()
+    return h, t
+
+
+def test_batch_metrics_equal_row_by_row(tmp_path):
+    from app.database.repository import DatabaseRepository
+    recs = []
+    trig = 1000
+    for i in range(300):
+        hh = "08" if i < 150 else "09"
+        trig = 5 if i == 200 else trig + (2 if i % 17 == 0 else 1)      # gaps + one counter reset
+        ng = i % 13 == 0
+        recs.append(rec(trig, ts=f"2026-10-05 {hh}:00:00", status="NG" if ng else "OK",
+                        tool2=("NG", 10 + i % 7) if ng else (None, 90 + i % 9), time_ms=30 + i % 11,
+                        program=i % 2))
+    a = DatabaseRepository(tmp_path / "a.db")
+    b = DatabaseRepository(tmp_path / "b.db")
+    try:
+        for it in _items(recs):
+            a.save_or_update_inspection(it["record"], it["analysis"], uid=it["uid"],
+                                        content_hash=it["content_hash"])
+        items = _items(recs)
+        for i in range(0, len(items), 64):                              # uneven batch boundaries
+            b.save_batch(items[i:i + 64])
+        assert _snapshot(a) == _snapshot(b)
+        assert a.count() == b.count() == 300
+    finally:
+        a.dispose()
+        b.dispose()
+
+
+def test_batch_actions_mixed(repo):
+    first = _items([rec(1), rec(2)])
+    assert [x[1] for x in repo.save_batch(first)] == ["CREATED", "CREATED"]
+
+    again = _items([rec(1)])                                  # same uid -> UPDATED, not counted twice
+    dup_db = [dict(first[1], uid="other")]                    # same hash as stored row -> DUPLICATE
+    new = _items([rec(3)])
+    dup_batch = [dict(new[0], uid="other2")]                  # same hash as earlier item in this batch
+    res = repo.save_batch(again + dup_db + new + dup_batch)
+    assert [a for _, a in res] == ["UPDATED", "DUPLICATE", "CREATED", "DUPLICATE"]
+    assert res[1][0] == repo.get_by_uid(first[1]["uid"]).id   # points at the stored row
+    assert res[3][0] == res[2][0]
+    assert repo.count() == 3
+    assert summarize(repo, by="day")[0].total == 3

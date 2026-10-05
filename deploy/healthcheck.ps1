@@ -4,12 +4,12 @@ Schedule every 5 minutes in Task Scheduler; on failure it writes to the
 Windows Application event log (source "IV4DataAgent") so IT monitoring
 can alert on it.
 
-    .\deploy\healthcheck.ps1 -MaxHeartbeatAgeSec 60 -MaxIncomingFiles 50
+    .\deploy\healthcheck.ps1 -MaxHeartbeatAgeSec 60 -MaxIncomingFilesPerSensor 400
 #>
 param(
     [string]$ProjectDir = (Resolve-Path "$PSScriptRoot\..").Path,
     [int]$MaxHeartbeatAgeSec = 60,
-    [int]$MaxIncomingFiles = 200,   # ~10 s of full-rate IV4 output
+    [int]$MaxIncomingFilesPerSensor = 400,   # ~10 s of full-rate output (2 files x 20/s); normal is ~60
     [string]$ServiceName = "IV4DataAgent"
 )
 
@@ -25,7 +25,9 @@ if (-not (Test-Path $healthFile)) {
     $h = Get-Content $healthFile -Raw | ConvertFrom-Json
     $age = ((Get-Date).ToUniversalTime() - ([datetime]$h.heartbeat_at).ToUniversalTime()).TotalSeconds
     if ($age -gt $MaxHeartbeatAgeSec) { $problems += "heartbeat is $([int]$age)s old" }
-    if ($h.incoming_files -gt $MaxIncomingFiles) { $problems += "backlog: $($h.incoming_files) files in incoming" }
+    foreach ($p in $h.incoming_by_sensor.PSObject.Properties) {
+        if ($p.Value -gt $MaxIncomingFilesPerSensor) { $problems += "backlog: $($p.Value) files waiting from $($p.Name)" }
+    }
     if ($h.disk_free_gb -ne $null -and $h.disk_free_gb -lt $h.min_free_gb) { $problems += "disk almost full: $($h.disk_free_gb) GB free (minimum $($h.min_free_gb))" }
 }
 

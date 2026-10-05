@@ -204,6 +204,7 @@ iv4-data-agent/
 ├── scripts/
 │   ├── backup_db.py
 │   ├── metrics.py           # รายงาน metric / export CSV
+│   ├── benchmark.py         # วัดว่าเครื่องนี้รองรับได้กี่ sensor
 │   ├── gdrive_auth.py       # ล็อกอิน Google Drive ครั้งเดียว
 │   └── stats.py
 │
@@ -635,6 +636,58 @@ python -m scripts.metrics --by day --per-sensor              # แยกตา�
 
 ---
 
+## 14.6 ประสิทธิภาพและ Spec เครื่อง
+
+### ความเร็ว (วัดจริงบนเครื่องทดสอบ 2 cores, Linux)
+
+| | ก่อนปรับ | หลังปรับ |
+| --- | --- | --- |
+| Throughput สูงสุด | 211 ชิ้น/วินาที | **~365–400 ชิ้น/วินาที** |
+| Real-time ที่ยืนยันแล้ว | — | **10 sensors (200 ชิ้น/วินาที)** ไม่มีตกหล่น, ตามทันภายใน ~1.5 s |
+| RAM | | ~50–70 MB |
+
+สิ่งที่ปรับ: แยกงานไฟล์ (ย้าย/hash/ตรวจรูป/parse/archive) ไปทำใน thread pool, บันทึก DB เป็น batch
+(1 transaction ต่อ ~200 ชิ้น, insert แบบ bulk, สรุป metric รายชั่วโมงก่อนเขียน), เลิก fsync manifest
+(ถ้าไฟฟ้าดับ ระบบสร้าง manifest ใหม่จากไฟล์เองตอน recovery)
+
+ปรับได้ใน `.env`: `IV4_WORKERS` (0 = อัตโนมัติ), `IV4_BATCH_SIZE` (default 200)
+
+> ตัวเลขข้างบนวัดบน Linux — Windows/NTFS + antivirus จะช้ากว่า **ต้องวัดบน Mini PC จริง**:
+>
+> ```powershell
+> python -m scripts.benchmark --dir D:\iv4-data-agent     # ~2-3 นาที, ไม่แตะข้อมูลจริง
+> ```
+>
+> หยุด service ก่อนวัด และให้ `--dir` อยู่บนดิสก์เดียวกับ `data\`
+
+### Spec ที่แนะนำ
+
+| ส่วน | ขั้นต่ำ (1–2 sensors) | แนะนำ (สูงสุด ~10 sensors) | เหตุผล |
+| --- | --- | --- | --- |
+| CPU | 4 cores, รุ่นปี 2022+ | 4–8 cores, single-thread แรง | Python ใช้ ~1–2 core เป็นหลัก → ความเร็วต่อ core สำคัญกว่าจำนวน core |
+| RAM | 8 GB | 16 GB | Agent ใช้ <100 MB; ที่เหลือสำหรับ Windows, FileZilla, Dashboard |
+| ดิสก์ระบบ + DB | SSD NVMe | SSD NVMe | ไฟล์เล็กจำนวนมาก + SQLite — **ห้ามใช้ HDD** สำหรับ incoming/processing/DB |
+| ดิสก์เก็บรูป (archive) | ≥ 1 TB SSD | 2–4 TB SSD หรือ NAS | ~8 GB/sensor/ชั่วโมงเดินเครื่อง (ดูข้อ 14.3) |
+| Network | Gigabit, แยกวงกับ sensor | Gigabit, การ์ดแลนแยกสำหรับวง sensor | ~19 Mbps/sensor; แยกวงเพื่อไม่ให้ traffic อื่นรบกวน |
+| OS | Windows 10/11 Pro | Windows 10/11 Pro / IoT LTSC | ตั้งเวลา update นอกเวลาผลิต |
+
+### ปัจจัยที่มีผลมากที่สุด (เรียงตามความสำคัญ)
+
+1. **Antivirus (Windows Defender)** สแกนทุกไฟล์ใหม่ — ขอ IT ยกเว้น `data\incoming`, `data\processing`,
+   `data\archive` และ `data\database` จาก real-time scanning (ทำให้ FTP + agent เร็วขึ้นชัดเจน)
+2. **ดิสก์** — SSD สำหรับทุกอย่างที่เขียนบ่อย; archive ย้ายไปดิสก์ใหญ่ได้ด้วย `IV4_ARCHIVE_DIR`
+   (ถ้าอยู่คนละ drive การย้ายจะเป็นการ copy — ช้ากว่าแต่ทำใน thread แยก)
+3. **Power plan = High performance** และปิด sleep / USB selective suspend
+4. **FileZilla Server** อยู่เครื่องเดียวกัน ใช้ CPU ต่อไฟล์ด้วย — benchmark ไม่ได้รวมส่วนนี้ จึงควรเผื่อ ~50%
+
+### ขยายมากกว่า ~10 sensors
+
+ข้อจำกัดคือ Python ประมวลผลหลักใน 1 process — แทนที่จะซื้อเครื่องแรงขึ้น แนะนำ **เพิ่ม Mini PC ตามกลุ่มสาย/โซน**
+(เช่น 1 เครื่องต่อ 5–10 sensors) เพราะกระจายความเสี่ยง (เครื่องเดียวเสีย ไม่หยุดทั้งโรงงาน)
+และกระจายทั้ง CPU, ดิสก์, network และ FTP แล้วรวมข้อมูลเข้า Dashboard กลาง
+
+---
+
 # 15. Analysis Engine
 
 Analysis Engine ใช้ข้อมูลจาก Inspection Record เพื่อวิเคราะห์ผล
@@ -895,6 +948,7 @@ Test ทั้งหมดใช้ temp folder และ temp database — **�
 | --- | --- |
 | `tests/test_parsing.py` | TXT parser (UTF-8/UTF-16/cp874), Inspection Record, Analyzer, Matcher |
 | `tests/test_database.py` | Create/Update, ID ซ้ำเก็บประวัติ, Duplicate hash, Migration จาก v1 |
+| `tests/test_metrics.py` (bulk) | batch insert ให้ผล metric เท่ากับทีละแถวทุกตัว (รวม counter reset), action ผสม CREATED/UPDATED/DUPLICATE |
 | `tests/test_multi_sensor.py` | 2 sensor ชื่อไฟล์ซ้ำ, missing แยก sensor, auto-detect folder, disk guard ลบเฉพาะ OK เก่าสุด |
 | `tests/test_metrics.py` | Metric รายชั่วโมง/วัน, missing จาก Trigger No., NG ตาม Tool, retention, ดิสก์ |
 | `tests/test_google_drive.py` | Upload ลงโครงสร้าง วัน/UID, root folder สร้างครั้งเดียว, เน็ตหลุดแล้ว retry ไม่ซ้ำ, config ผิดไม่ทำให้ service ล่ม |

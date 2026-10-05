@@ -22,6 +22,7 @@ import shutil
 import signal
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from watchdog.events import FileSystemEventHandler
@@ -47,12 +48,13 @@ from app.ingestion.record import (
     create_manifest,
     load_manifest,
     make_uid,
+    rebuild_manifest,
     save_manifest,
     utc_now,
 )
 from app.ingestion.stability import StabilityTracker
 from app.maintenance import MaintenanceWorker, disk_free_gb
-from app.pipeline import PipelineError, archive_rel_path, run_pipeline
+from app.pipeline import PipelineError, archive_rel_path, prepare
 
 log = logging.getLogger("iv4.agent")
 
@@ -88,6 +90,7 @@ class IV4Agent:
         self.wake = threading.Event()
         self.upload_worker = None
         self.maintenance = None
+        self.pool = ThreadPoolExecutor(max_workers=settings.worker_count(), thread_name_prefix="iv4-worker")
         self._last_retry = 0.0
 
         self.stats = {
@@ -120,6 +123,7 @@ class IV4Agent:
         now = self.clock()
         root = s.incoming_dir
 
+        ready: list[GroupStatus] = []
         for sensor, folder, group_id, files in sorted(found, key=lambda x: (x[0], x[2])):
             if self.stop_event.is_set():
                 return
@@ -136,7 +140,7 @@ class IV4Agent:
             status.uid_prefix = None if folder == root else sensor
 
             if status.status == COMPLETE and all_stable:
-                self._handle_complete(status)
+                ready.append(status)
 
             elif status.status == INVALID and all_stable:
                 self._quarantine_loose(status, f"INVALID group: {status.reason}")
@@ -153,6 +157,16 @@ class IV4Agent:
                         f"(images={len(status.image_files)}, texts={len(status.text_files)}): {names}",
                     )
 
+        bs = max(1, s.batch_size)
+        for i in range(0, len(ready), bs):
+            if self.stop_event.is_set():
+                return
+            chunk = ready[i:i + bs]
+            claimed = [c for c in self.pool.map(self._claim, chunk) if c is not None]
+            for st in chunk:
+                self.tracker.forget(st.files)
+            self._process_claimed(claimed)
+
     def _quarantine_loose(self, status: GroupStatus, reason: str) -> None:
         name = make_uid(status.group_id, sensor=status.uid_prefix)
         quarantine(status.files, self.settings.error_dir, name, reason)
@@ -160,10 +174,11 @@ class IV4Agent:
         self._record_error(reason)
 
     # ------------------------------------------------------------
-    # Claim + process one complete group
+    # Claim + process (parallel file work, one DB transaction per batch)
     # ------------------------------------------------------------
 
-    def _handle_complete(self, status: GroupStatus) -> None:
+    def _claim(self, status: GroupStatus) -> tuple[Path, dict] | None:
+        """Worker thread: move a complete group into processing/<uid>/ + write manifest."""
         s = self.settings
         group_id = status.group_id
         uid = make_uid(group_id, sensor=status.uid_prefix)
@@ -171,7 +186,7 @@ class IV4Agent:
 
         moved: list[Path] = []
         try:
-            sha = content_hash(status.files)
+            sha = content_hash(status.files, status.sensor_id)
             for f in status.files:
                 moved += move_files([f], folder)
         except OSError as exc:
@@ -186,72 +201,94 @@ class IV4Agent:
                 folder.rmdir()
             except OSError:
                 pass
-            return
-        finally:
-            self.tracker.forget(status.files)
+            return None
 
         image = next((f for f in moved if f.suffix.lower() in s.supported_image_ext), None)
         texts = [f for f in moved if f.suffix.lower() in s.supported_text_ext]
         manifest = create_manifest(uid, group_id, image or folder, texts, sha, sensor_id=status.sensor_id)
         save_manifest(manifest, folder)
-        log.info("[CLAIMED] sensor=%s group=%s uid=%s files=%d", status.sensor_id, group_id, uid, len(moved))
+        log.debug("[CLAIMED] sensor=%s group=%s uid=%s files=%d", status.sensor_id, group_id, uid, len(moved))
+        return folder, manifest
 
-        self._process_folder(folder, manifest)
-
-    def _process_folder(self, folder: Path, manifest: dict) -> None:
-        uid = manifest["uid"]
+    def _prepare(self, item: tuple[Path, dict]):
+        """Worker thread: image check + parse + analysis. Returns Prepared or the exception."""
+        folder, manifest = item
         manifest["attempts"] = manifest.get("attempts", 0) + 1
         try:
-            result = run_pipeline(folder, manifest, self.repo, self.settings)
+            return prepare(folder, manifest, self.settings)
+        except Exception as exc:  # noqa: BLE001
+            if not isinstance(exc, PipelineError):
+                log.exception("[UNEXPECTED] uid=%s", manifest.get("uid"))
+            return exc
 
-        except PipelineError as exc:
-            manifest["error"] = str(exc)
-            if exc.stage == "DATABASE" and manifest["attempts"] < DB_MAX_ATTEMPTS:
-                save_manifest(manifest, folder)
-                log.error("[DB RETRY] uid=%s attempt=%d %s", uid, manifest["attempts"], exc)
-                self._record_error(str(exc))
-                return
-            manifest["status"] = FAILED
-            save_manifest(manifest, folder)
-            quarantine(folder, self.settings.error_dir, uid, str(exc))
-            self._record_error(str(exc))
-            return
-
-        except Exception as exc:  # noqa: BLE001 – never let one file kill the service
-            log.exception("[UNEXPECTED] uid=%s", uid)
-            manifest["status"] = FAILED
-            manifest["error"] = repr(exc)
-            save_manifest(manifest, folder)
-            quarantine(folder, self.settings.error_dir, uid, f"UNEXPECTED: {exc!r}")
-            self._record_error(repr(exc))
-            return
-
-        if result.action == "DUPLICATE":
-            manifest["status"] = FAILED
-            manifest["error"] = f"DUPLICATE of database id {result.database_id}"
-            save_manifest(manifest, folder)
-            quarantine(folder, self.settings.error_dir, uid, manifest["error"])
-            self.stats["duplicates"] += 1
-            return
-
-        manifest["status"] = DONE
-        manifest["error"] = None
-        manifest["analysis_status"] = result.status
-        manifest["database_id"] = result.database_id
-        manifest["archive"] = result.archive_rel
+    def _fail(self, folder: Path, manifest: dict, reason: str, count_error: bool = True) -> None:
+        manifest["status"] = FAILED
+        manifest["error"] = reason
         save_manifest(manifest, folder)
-        self._archive(folder, manifest)
+        quarantine(folder, self.settings.error_dir, manifest["uid"], reason)
+        if count_error:
+            self._record_error(reason)
 
-        self.stats["processed"] += 1
-        key = result.status.lower()
-        if key in self.stats:
-            self.stats[key] += 1
-        self.stats["last_success_at"] = utc_now()
+    def _process_claimed(self, items: list[tuple[Path, dict]]) -> None:
+        if not items:
+            return
 
-        log.info(
-            "[DONE] uid=%s status=%s action=%s db_id=%s",
-            uid, result.status, result.action, result.database_id,
-        )
+        # 1. parse/analyse in parallel
+        results = list(self.pool.map(self._prepare, items))
+        good = []
+        for (folder, manifest), res in zip(items, results):
+            if isinstance(res, Exception):
+                reason = str(res) if isinstance(res, PipelineError) else f"UNEXPECTED: {res!r}"
+                self._fail(folder, manifest, reason)
+            else:
+                good.append(res)
+        if not good:
+            return
+
+        # 2. one DB transaction for the whole batch
+        try:
+            saved = self.repo.save_batch([
+                dict(record=p.record, analysis=p.analysis, uid=p.manifest["uid"],
+                     content_hash=p.manifest.get("content_hash"),
+                     image_file=p.manifest.get("image"), folder=p.archive_rel)
+                for p in good
+            ])
+        except Exception as exc:  # noqa: BLE001 – DB locked / disk full / ...
+            for p in good:
+                p.manifest["error"] = f"DATABASE: {exc}"
+                if p.manifest["attempts"] < DB_MAX_ATTEMPTS:
+                    save_manifest(p.manifest, p.folder)        # stays CLAIMED -> retried
+                else:
+                    self._fail(p.folder, p.manifest, f"DATABASE: {exc}")
+            log.error("[DB RETRY] %d inspection(s) attempt=%d: %s", len(good), good[0].manifest["attempts"], exc)
+            self._record_error(f"DATABASE: {exc}")
+            return
+
+        # 3. finalize (manifest DONE + archive move) in parallel
+        done = []
+        for p, (db_id, action) in zip(good, saved):
+            if action == "DUPLICATE":
+                self._fail(p.folder, p.manifest, f"DUPLICATE of database id {db_id}", count_error=False)
+                self.stats["duplicates"] += 1
+                continue
+            p.manifest.update(status=DONE, error=None, analysis_status=p.analysis.status,
+                              database_id=db_id, archive=p.archive_rel)
+            done.append((p, action))
+
+        list(self.pool.map(lambda pa: self._finalize(pa[0]), done))
+
+        for p, action in done:
+            self.stats["processed"] += 1
+            key = p.analysis.status.lower()
+            if key in self.stats:
+                self.stats[key] += 1
+            log.info("[DONE] uid=%s status=%s action=%s", p.manifest["uid"], p.analysis.status, action)
+        if done:
+            self.stats["last_success_at"] = utc_now()
+
+    def _finalize(self, p) -> None:
+        save_manifest(p.manifest, p.folder)
+        self._archive(p.folder, p.manifest)
 
     # ------------------------------------------------------------
     # Recovery: processing/ folders left CLAIMED (crash / DB down)
@@ -280,19 +317,28 @@ class IV4Agent:
 
     def recover_processing(self) -> int:
         """Finish anything left in processing/ (crash, DB down, archive move failed)."""
-        recovered = 0
-        for folder in sorted(p for p in self.settings.processing_dir.iterdir() if p.is_dir()):
+        s = self.settings
+        claimed: list[tuple[Path, dict]] = []
+        known = {name for name, _ in s.sensor_sources()}
+        for folder in sorted(p for p in s.processing_dir.iterdir() if p.is_dir()):
             manifest = load_manifest(folder)
             if manifest is None:
-                continue  # legacy v1 folder / broken manifest: leave untouched
+                manifest = rebuild_manifest(folder, s.supported_image_ext, s.supported_text_ext,
+                                            known, s.sensor_id)
+                if manifest is None:
+                    continue
+                log.warning("[RECOVER] rebuilt missing manifest for %s", folder.name)
+                save_manifest(manifest, folder)
             status = manifest.get("status")
             if status == CLAIMED:
-                log.info("[RECOVER] uid=%s", manifest.get("uid"))
-                self._process_folder(folder, manifest)
-                recovered += 1
+                claimed.append((folder, manifest))
             elif status == DONE:
                 self._archive(folder, manifest)
-        return recovered
+        bs = max(1, s.batch_size)
+        for i in range(0, len(claimed), bs):
+            log.info("[RECOVER] %d inspection(s)", len(claimed[i:i + bs]))
+            self._process_claimed(claimed[i:i + bs])
+        return len(claimed)
 
     # ------------------------------------------------------------
     # Health
@@ -351,6 +397,7 @@ class IV4Agent:
         log.info("Error      : %s", s.error_dir)
         log.info("Database   : %s", s.database_path)
         log.info("Settle     : %.1fs  Group timeout: %.0fs", s.settle_seconds, s.group_timeout)
+        log.info("Workers    : %d threads, DB batch %d", s.worker_count(), s.batch_size)
         log.info("Archive    : %s", s.archive_dir)
         log.info("Retention  : OK=%s NG=%s rows=%s (days, 0=keep)",
                  s.retention_ok_days, s.retention_ng_days, s.retention_rows_days)
@@ -395,6 +442,7 @@ class IV4Agent:
             if self.maintenance is not None:
                 self.maintenance.join(timeout=30)
             self.write_health()
+            self.pool.shutdown(wait=True)
             self.repo.dispose()
             log.info("IV4 Data Agent stopped")
 
