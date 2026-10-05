@@ -1,10 +1,10 @@
 """
 Production metrics for reports / presentations.
 
-    python -m scripts.metrics                          # today, per hour
-    python -m scripts.metrics --from 2026-10-01 --to 2026-10-08 --by day
-    python -m scripts.metrics --by day --csv report.csv   # open in Excel
-    python -m scripts.metrics --by day --per-sensor       # one row per sensor
+    run metrics                   # today, per hour
+    run metrics --from 2026-10-01 --to 2026-10-08 --by day
+    run metrics --by day --csv report.csv   # open in Excel
+    run metrics --by day --per-sensor       # one row per sensor
 
 Times are sensor local time. --to is exclusive.
 """

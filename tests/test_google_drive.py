@@ -149,7 +149,7 @@ def test_reupload_skips_existing_files(settings, repo, clock, drive):
 
 def test_missing_oauth_token_is_config_error(settings):
     settings.gdrive_auth = "oauth"
-    with pytest.raises(DriveConfigError, match="gdrive_auth"):
+    with pytest.raises(DriveConfigError, match="run gdrive-auth"):
         build_drive_service(settings)
 
 
@@ -172,7 +172,7 @@ def test_worker_survives_config_error_and_keeps_items_pending(settings, repo, cl
     stop.set()
     w.join(timeout=5)
     assert not w.is_alive()
-    assert "gdrive_auth" in w.stats["last_upload_error"]
+    assert "run gdrive-auth" in w.stats["last_upload_error"]
     assert w.stats["pending"] == 1
 
 

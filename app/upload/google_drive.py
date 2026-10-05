@@ -8,7 +8,7 @@ Two supported modes:
 
 * ``oauth`` (default, personal Gmail): create an OAuth "Desktop app" client
   in Google Cloud Console, save it as credentials/client_secret.json, then
-  run ``python -m scripts.gdrive_auth`` once on the Mini PC to sign in.
+  run ``run gdrive-auth`` once on the Mini PC to sign in.
   A refresh token is stored in credentials/token.json and reused.
   Scope ``drive.file`` = the agent can only see files it created itself.
 
@@ -75,7 +75,7 @@ def build_drive_service(settings: Settings):
         token = settings.gdrive_token
         if not token or not token.exists():
             raise DriveConfigError(
-                f"OAuth token not found ({token}). Run once on this PC: python -m scripts.gdrive_auth"
+                f"OAuth token not found ({token}). Run once on this PC: run gdrive-auth"
             )
         creds = Credentials.from_authorized_user_file(str(token), OAUTH_SCOPES)
         if not creds.valid:
@@ -83,7 +83,7 @@ def build_drive_service(settings: Settings):
                 creds.refresh(Request())
                 token.write_text(creds.to_json(), encoding="utf-8")
             else:
-                raise DriveConfigError("OAuth token invalid. Re-run: python -m scripts.gdrive_auth")
+                raise DriveConfigError("OAuth token invalid. Re-run: run gdrive-auth")
 
     return build("drive", "v3", credentials=creds, cache_discovery=False)
 

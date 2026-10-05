@@ -1,9 +1,10 @@
 <#
 Install IV4 Data Agent as a Windows Service using NSSM (https://nssm.cc).
 
-Run in an *elevated* PowerShell from the project root:
+Run in an *elevated* (Administrator) PowerShell from the project root:
 
-    .\deploy\install_service.ps1 -Nssm "C:\tools\nssm\win64\nssm.exe"
+    .\run.bat service install -Nssm "C:\tools\nssm\win64\nssm.exe"
+    (or: .\deploy\install_service.ps1 -Nssm "C:\tools\nssm\win64\nssm.exe")
 
 The service:
   * starts automatically (delayed) after boot
@@ -20,7 +21,13 @@ param(
 
 $ErrorActionPreference = "Stop"
 $python = Join-Path $ProjectDir ".venv\Scripts\python.exe"
-if (-not (Test-Path $python)) { throw "Python venv not found: $python (create .venv and pip install -r requirements.txt first)" }
+if (-not (Test-Path $python)) {
+    Write-Host "First-time setup (venv + dependencies) ..."
+    & cmd /c "`"$ProjectDir\run.bat`" check"
+    if (-not (Test-Path $python)) { throw "Setup failed - run run.bat check and read the messages" }
+}
+& $python -m app check
+if ($LASTEXITCODE -ne 0) { throw "Preflight check failed - fix the FAIL items above, then install again" }
 
 $logs = Join-Path $ProjectDir "logs"
 New-Item -ItemType Directory -Force -Path $logs | Out-Null

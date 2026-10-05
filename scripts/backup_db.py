@@ -1,8 +1,8 @@
 """
 Online SQLite backup (safe while the agent is running, WAL-aware).
 
-    python -m scripts.backup_db                 # -> backups/iv4_YYYYmmdd_HHMMSS.db
-    python -m scripts.backup_db --keep 30       # keep newest 30 backups
+    run backup                 # -> backups/iv4_YYYYmmdd_HHMMSS.db
+    run backup --keep 30       # keep newest 30 backups
 
 Schedule it daily with Windows Task Scheduler (see deploy/README_DEPLOY.md).
 """
@@ -38,9 +38,13 @@ def backup(dest_dir: Path, keep: int) -> Path:
     return target
 
 
-if __name__ == "__main__":
+def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dest", default=str(BASE_DIR / "backups"))
     ap.add_argument("--keep", type=int, default=30)
     a = ap.parse_args()
     print(backup(Path(a.dest), a.keep))
+
+
+if __name__ == "__main__":
+    main()
