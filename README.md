@@ -878,6 +878,7 @@ run
 | `run metrics --by day --per-sensor` | รายงาน metric (`run metrics --help`) |
 | `run benchmark` | วัดว่าเครื่องนี้รองรับได้กี่ sensor |
 | `run gdrive-auth` | ล็อกอิน Google Drive ครั้งเดียว |
+| `run upload` | ตรวจว่าทำไมไม่อัปโหลดขึ้น Google Drive (บอกสาเหตุและวิธีแก้) |
 | `run gdrive-switch` | เปลี่ยน Gmail: ลืมบัญชีเก่า แล้วล็อกอินใหม่ (หยุด agent ก่อน) |
 | `run gdrive-logout` | ลืมบัญชี Google ที่ล็อกอินไว้ |
 | `run sheets` | สร้าง/อัปเดต Google Sheets Dashboard หนึ่งครั้ง แล้วแสดงลิงก์ |
@@ -1249,6 +1250,8 @@ IV4_GDRIVE_FOLDER_ID=<id ของ folder ใน Shared Drive ที่ share �
 
 `logs/health.json` → `upload.pending`, `upload.uploaded`, `upload.last_upload_error`
 และ `manifest.json` ของแต่ละ inspection มี `uploaded_at` / `upload_ref` (Drive folder id)
+
+**ไม่ขึ้น Google Drive? รัน `run upload`** ตรวจให้ตามลำดับที่พลาดบ่อย: (1) `IV4_UPLOAD_ENABLED` ยังเป็น `false` (ค่าเริ่มต้นคือปิด) (2) ยังไม่ได้ล็อกอิน/ไม่มี `client_secret.json` (3) ค่าเริ่มต้นอัปโหลดเฉพาะ **NG/UNKNOWN** ถ้าที่ผ่านมามีแต่ OK จะไม่มีอะไรขึ้นเลย (ตั้ง `IV4_UPLOAD_STATUSES=ALL` เฉพาะเมื่อ Drive ใหญ่พอ) (4) แก้ `.env` แล้วยังไม่ restart agent (5) error ล่าสุดจาก Google พร้อมวิธีแก้ เช่น ยังไม่ได้เปิด Google Drive API, token หมดอายุ, Drive เต็ม ทดสอบการเชื่อมต่อจริงด้วย `run gdrive-auth --test` สถานะย่อดูได้ที่ `run status` / `run monitor` (บรรทัด Upload)
 
 > ไฟล์ใน `credentials/` ห้าม commit (อยู่ใน `.gitignore` แล้ว)
 

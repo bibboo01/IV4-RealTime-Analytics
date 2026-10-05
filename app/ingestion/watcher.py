@@ -371,7 +371,9 @@ class IV4Agent:
             "archive_dir": str(self.settings.archive_dir),
             "maintenance": self.maintenance.stats if self.maintenance else None,
             "upload": (
-                {"enabled": True, "backend": self.settings.upload_backend, **self.upload_worker.stats}
+                {"enabled": True, "backend": self.settings.upload_backend,
+                 "statuses": None if self.settings.upload_statuses is None else sorted(self.settings.upload_statuses),
+                 **self.upload_worker.stats}
                 if self.upload_worker else {"enabled": False}
             ),
             "sheets": (

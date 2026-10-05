@@ -8,6 +8,7 @@ IV4 Data Agent - one command for everything.
     run metrics [...]       production metrics (see: run metrics --help)
     run benchmark [...]     how many sensors can this machine handle
     run gdrive-auth         one-time Google Drive sign-in
+    run upload              why isn't it uploading to Google Drive? (diagnosis)
     run gdrive-switch       change Google account (forget the old one, sign in again)
     run gdrive-logout       forget the Google account
     run sheets              publish the Google Sheets dashboard once and print its link
@@ -188,6 +189,8 @@ def preflight(s: Settings) -> list[tuple[str, str]]:
     else:
         add(WARN, "nothing listening on port 21 - is FileZilla Server running? (sensors cannot send)")
 
+    if not s.upload_enabled:
+        add(WARN, "Google Drive upload is OFF (IV4_UPLOAD_ENABLED=false) - nothing is uploaded. See: run upload")
     wants_google = (s.upload_enabled and s.upload_backend == "gdrive") or s.sheets_enabled
     if wants_google and s.gdrive_auth == "oauth":
         if not (s.gdrive_token and s.gdrive_token.exists()):
@@ -271,6 +274,8 @@ def cmd_status(_args, s: Settings) -> int:
         if up.get("enabled"):
             print(f"Upload     : {up.get('backend')} uploaded {up.get('uploaded', 0)}, pending {up.get('pending', 0)}"
                   + (f", error: {up['last_upload_error'][:100]}" if up.get("last_upload_error") else ""))
+        else:
+            print("Upload     : OFF (IV4_UPLOAD_ENABLED=false) - run upload for details")
 
     try:
         from app.database.repository import DatabaseRepository
@@ -293,6 +298,11 @@ def cmd_status(_args, s: Settings) -> int:
     except Exception as exc:  # noqa: BLE001
         print(f"\n(database not readable: {exc})")
     return 0 if healthy else 1
+
+
+def cmd_upload(args, s: Settings) -> int:
+    from app import diagnose
+    return diagnose.run(args, s, InstanceLock(s.log_dir).running_pid)
 
 
 def cmd_production(args, s: Settings) -> int:
@@ -380,6 +390,7 @@ COMMANDS = {
     "test": cmd_test,
     "service": cmd_service,
     "production": cmd_production,
+    "upload": cmd_upload,
 }
 
 
