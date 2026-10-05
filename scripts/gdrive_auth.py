@@ -27,10 +27,36 @@ from __future__ import annotations
 
 import argparse
 import tempfile
+import threading
+import webbrowser
 from pathlib import Path
 
 from app.config import load_settings
 from app.upload.google_drive import OAUTH_SCOPES, GoogleDriveUploader
+
+
+def sign_in(flow, open_browser: bool = True):
+    """
+    Run the local-server sign-in. The link is always printed first, and the browser is opened from a
+    background thread: on some Windows PCs webbrowser.open() blocks, which used to hide the link and
+    leave the window looking stuck.
+    """
+    if open_browser:
+        original = flow.authorization_url
+
+        def authorization_url(**kwargs):
+            url, state = original(**kwargs)
+            threading.Thread(target=webbrowser.open, args=(url,), kwargs={"new": 1}, daemon=True).start()
+            return url, state
+
+        flow.authorization_url = authorization_url
+    try:
+        return flow.run_local_server(
+            port=0, open_browser=False,
+            authorization_prompt_message="Sign-in link (copy into a browser on this PC if none opened):\n{url}\n",
+            success_message="IV4 Data Agent: sign-in complete. You can close this tab.")
+    except KeyboardInterrupt:
+        raise SystemExit("Sign-in cancelled - nothing saved. Run: run gdrive-auth --test") from None
 
 
 def state_files(s) -> list[Path]:
@@ -85,14 +111,10 @@ def main() -> None:
                 "(A Google API key cannot upload to Drive.)"
             )
         flow = InstalledAppFlow.from_client_secrets_file(str(s.gdrive_credentials), OAUTH_SCOPES)
-        print("Waiting for Google sign-in in the browser (open the URL below on THIS computer;\n"
-              "keep this window open until 'Saved token' appears, Ctrl+C cancels).\n")
-        try:
-            creds = flow.run_local_server(
-                port=0, open_browser=not args.no_browser,
-                success_message="IV4 Data Agent: sign-in complete. You can close this tab.")
-        except KeyboardInterrupt:
-            raise SystemExit("Sign-in cancelled - nothing saved. Run: run gdrive-auth --test")
+        print("Waiting for Google sign-in. The sign-in link is shown below and a browser is opened for you;\n"
+              "if no browser appears, copy the link into a browser on THIS computer.\n"
+              "Keep this window open until 'Saved token' appears (Ctrl+C cancels).\n")
+        creds = sign_in(flow, open_browser=not args.no_browser)
         s.gdrive_token.parent.mkdir(parents=True, exist_ok=True)
         s.gdrive_token.write_text(creds.to_json(), encoding="utf-8")
         print(f"Saved token -> {s.gdrive_token}")

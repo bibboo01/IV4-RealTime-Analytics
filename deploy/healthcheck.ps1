@@ -15,8 +15,11 @@ param(
 
 $problems = @()
 
+# The agent runs either as a Windows service (NSSM) or as a Task Scheduler task of the same name
 $svc = Get-Service $ServiceName -ErrorAction SilentlyContinue
-if (-not $svc -or $svc.Status -ne "Running") { $problems += "service $ServiceName not running" }
+$task = Get-ScheduledTask -TaskName $ServiceName -ErrorAction SilentlyContinue
+$running = ($svc -and $svc.Status -eq "Running") -or ($task -and $task.State -eq "Running")
+if (-not $running) { $problems += "$ServiceName is not running (neither service nor scheduled task)" }
 
 $healthFile = Join-Path $ProjectDir "logs\health.json"
 if (-not (Test-Path $healthFile)) {
