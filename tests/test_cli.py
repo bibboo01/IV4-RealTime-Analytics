@@ -121,3 +121,62 @@ def test_bootstrap_hash_changes_with_requirements(tmp_path, monkeypatch):
     assert b.requirements_hash(dev=True) != h1
     (tmp_path / "requirements.txt").write_text("watchdog==6.0.1\n")
     assert b.requirements_hash(dev=False) != h1
+
+
+def _seed_today(settings, now):
+    from sqlalchemy import text
+
+    from app.database.repository import DatabaseRepository
+    repo = DatabaseRepository(settings.database_path)
+    hour = now.strftime("%Y-%m-%d %H")
+    with repo.engine.begin() as c:
+        for sensor, total, ng, tmin, tmax in (("IV4-01", 1000, 20, 1, 1000), ("IV4-02", 990, 50, 1, 1000)):
+            c.execute(text(
+                "INSERT INTO hourly_stats (hour, program_no, sensor_id, total, pass_count, fail_count, unknown_count,"
+                " time_ms_sum, time_ms_count, time_ms_max, trigger_min, trigger_max, trigger_resets)"
+                " VALUES (:h, 0, :s, :t, :ok, :ng, 0, :t * 36, :t, 40, :a, :b, 0)"),
+                {"h": hour, "s": sensor, "t": total, "ok": total - ng, "ng": ng, "a": tmin, "b": tmax})
+        c.execute(text(
+            "INSERT INTO hourly_tool_stats (hour, program_no, sensor_id, tool_no, tool_name, count, ng_count,"
+            " value_sum, value_count, value_min, ok_value_min) VALUES (:h, 0, 'IV4-02', 2, 'AI Differentiate',"
+            " 990, 50, 95000, 990, 12, 99)"), {"h": hour})
+        c.execute(text(
+            "INSERT INTO inspection (uid, inspection_id, timestamp, camera_id, analysis_status, analysis_reason,"
+            " created_at, updated_at) VALUES ('u1', '00042_x', :ts, 'IV4-02', 'FAIL',"
+            " 'Inspection result is NG; Tool02:AI Differentiate NG (value=12)', :c, :c)"),
+            {"ts": now.strftime("%Y-%m-%d %H:%M:%S"), "c": datetime.now(timezone.utc).replace(tzinfo=None)})
+    repo.dispose()
+
+
+def test_monitor_once_empty_and_stopped(settings, capsys):
+    assert cli._monitor(["--once", "--no-color"], settings) == 0
+    out = capsys.readouterr().out
+    assert "STOPPED" in out and "no inspections yet today" in out and "agent is not running" in out
+
+
+def test_monitor_once_shows_today_tools_ng_and_alerts(settings, capsys):
+    now = datetime.now()
+    _seed_today(settings, now)
+    (settings.log_dir / "health.json").write_text(json.dumps({
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "heartbeat_at": datetime.now(timezone.utc).isoformat(), "processed": 1990, "pass": 1920, "fail": 70,
+        "unknown": 0, "duplicates": 0, "errors": 0, "last_error": None, "incoming_files": 3,
+        "incoming_by_sensor": {"incoming/ (root)": 0, "IV4-01": 1, "IV4-02": 2}, "disk_free_gb": 500,
+        "min_free_gb": 20, "upload": {"enabled": False},
+    }))
+    lock = cli.InstanceLock(settings.log_dir)
+    assert lock.acquire()
+    try:
+        assert cli._monitor(["--once", "--no-color"], settings) == 0
+    finally:
+        lock.release()
+    out = capsys.readouterr().out
+    assert "RUNNING" in out and "IV4-01 1, IV4-02 2" in out
+    assert "\x1b[" not in out                                   # --once / --no-color: plain text
+    today = out.split("TODAY", 1)[1].split("LAST", 1)[0]
+    lines = {ln.split()[0]: ln for ln in today.splitlines() if ln.strip().startswith(("IV4-0", "ALL"))}
+    assert "1,990" in lines["ALL"] and "70" in lines["ALL"] and "3.52%" in lines["ALL"]
+    assert "5.05%" in lines["IV4-02"] and " 10 " in lines["IV4-02"]          # 1000 counted, 990 received
+    assert "Tool02 AI Differentiate" in out and "00042_x" in out
+    assert "Tool02:AI Differentiate NG (value=12)" in out and "Inspection result is" not in out
+    assert "IV4-02: 10 inspections missing this hour" in out

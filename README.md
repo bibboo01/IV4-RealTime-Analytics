@@ -874,6 +874,7 @@ run
 | `run` | ติดตั้ง (ถ้ายังไม่ได้) + ตรวจ + เริ่มทำงาน |
 | `run check` | ตรวจความพร้อมอย่างเดียว |
 | `run status` | กำลังทำงานอยู่ไหม, ไฟล์ค้าง, error ล่าสุด, ยอดวันนี้แยก sensor (exit code 1 = ไม่ทำงาน/ผิดปกติ) |
+| `run monitor` | **หน้าจอ monitor สด** ใน terminal อัปเดตทุก 2 วินาที (ดูหัวข้อถัดไป) |
 | `run metrics --by day --per-sensor` | รายงาน metric (`run metrics --help`) |
 | `run benchmark` | วัดว่าเครื่องนี้รองรับได้กี่ sensor |
 | `run gdrive-auth` | ล็อกอิน Google Drive ครั้งเดียว |
@@ -885,6 +886,41 @@ run
 * เปิดซ้ำไม่ได้: ถ้ามี agent ทำงานอยู่แล้ว (รวมถึง service) จะบอก `Already running` แล้วออก — ไม่เกิดการประมวลผลซ้อน
 * ค่าใน `.env` ผิด (เช่น `IV4_GROUP_TIMEOUT=two minutes`) จะบอกชื่อค่าที่ผิดทันที
 * Linux/macOS ใช้ `./run.sh` คำสั่งเดียวกัน
+
+## 22.1 Live monitor ใน terminal (`run monitor`)
+
+เปิด terminal อีกหน้าต่าง (หรือผ่าน Remote Desktop) ขณะที่ agent/service ทำงานอยู่ แล้วพิมพ์ `run monitor` — อ่านอย่างเดียว ไม่กระทบการรับข้อมูล ออกด้วย `Ctrl+C`
+
+```
+ IV4 Data Agent  -  live monitor                              2026-10-05 09:30:12
+ Agent    ● RUNNING  pid 803   heartbeat 1s ago   up 3h 12m
+ Speed    40.1 /s last min  (IV4-01 20.0, IV4-02 20.1)  Waiting  IV4-01 3, IV4-02 2
+ Session  processed 461,820   PASS 457,102   FAIL 4,718   UNKNOWN 0   dup 0
+ Errors   0     Disk free 812 GB
+
+ TODAY 2026-10-05  (sensor clock)
+  Sensor          Total       NG     NG %    Yield  Missing  Avg ms  Run h
+  IV4-01        230,910    1,155    0.50%   99.50%        0    36.0      4
+  IV4-02        230,910    3,563    1.54%   98.46%        0    36.1      4
+  ALL           461,820    4,718    1.02%   98.98%        0    36.0      4
+
+ LAST 8 HOURS  (all sensors)          <- กราฟแท่งยอดตรวจ + NG % รายชั่วโมง
+ TOOLS TODAY                           <- NG แยก Tool, ค่าเฉลี่ย, ค่าต่ำสุดที่ยังผ่าน (margin)
+ LATEST NG                             <- 5 ชิ้น NG ล่าสุด: เวลา, sensor, ชื่อไฟล์, Tool ที่ NG
+ ALERTS                                <- agent หยุด/ค้าง, ไฟล์ค้างเยอะ, missing > 0, ดิสก์ใกล้เต็ม, error/upload ล่าสุด
+```
+
+| ตัวเลือก | ทำอะไร |
+| --- | --- |
+| `run monitor --interval 5` | อัปเดตทุก 5 วินาที |
+| `run monitor --hours 24` | กราฟรายชั่วโมงย้อนหลัง 24 ชั่วโมง |
+| `run monitor --once` | พิมพ์ครั้งเดียวแล้วออก (ใช้ใน script หรือ `> snapshot.txt`) |
+| `run monitor --no-color` | ไม่ใช้สี |
+
+* **Speed** = จำนวนชิ้นที่เข้า DB ใน 60 วินาทีล่าสุด แยก sensor — 2 sensor ปกติควรใกล้ 40 /s ตอนเครื่องเดิน
+* **Waiting** = ไฟล์ที่รอใน `incoming` — ถ้าเกิน 200 และเพิ่มขึ้นเรื่อย ๆ แปลว่าเครื่องรับไม่ทัน
+* **Missing** ต้องเป็น 0 — ถ้าไม่ใช่ แปลว่า sensor ตรวจแล้วแต่ไฟล์ไม่มาถึงทาง FTP
+* ทุกตัวเลขอ่านจากตารางสรุปรายชั่วโมง + `logs/health.json` จึงเร็วแม้ DB มีหลายล้านแถว
 
 ---
 
@@ -1540,7 +1576,7 @@ Realtime Monitoring และ Historical Analysis
 * Error Recovery — manifest + retry + startup recovery
 * Log Rotation — `logs/iv4_agent.log`
 * Backup — `run backup --keep 30`
-* Summary — `run status` / `run metrics`
+* Summary — `run monitor` (live) / `run status` / `run metrics`
 
 ---
 
