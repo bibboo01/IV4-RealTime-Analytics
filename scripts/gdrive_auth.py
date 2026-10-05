@@ -11,8 +11,8 @@ Prerequisite: in Google Cloud Console
 
 Then on the Mini PC (needs a browser once):
 
-    python -m scripts.gdrive_auth            # sign in, saves credentials/token.json
-    python -m scripts.gdrive_auth --test     # also upload a small test file
+    run gdrive-auth          # sign in, saves credentials/token.json
+    run gdrive-auth --test     # also upload a small test file
 
 The agent then refreshes the token automatically.
 """

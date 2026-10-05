@@ -1,7 +1,7 @@
 """
 Quick production summary from the database.
 
-    python -m scripts.stats            # today + all time
+    run status   (or run metrics)            # today + all time
 """
 from __future__ import annotations
 

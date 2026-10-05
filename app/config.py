@@ -8,6 +8,7 @@ variables take precedence over `.env`.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -23,8 +24,26 @@ def _load_dotenv(path: Path) -> dict[str, str]:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
-        values[key.strip()] = value.strip().strip('"').strip("'")
+        values[key.strip()] = _clean_value(value)
     return values
+
+
+def _clean_value(value: str) -> str:
+    """
+    'abc'  /  "abc"           -> abc   (quotes keep '#' and spaces)
+    1.0   # seconds ...       -> 1.0   (inline comment needs a space before '#')
+    """
+    value = value.strip()
+    if value.startswith("#"):
+        return ""                       # empty value followed by a comment
+    if value[:1] in {'"', "'"}:
+        end = value.find(value[0], 1)
+        return value[1:end] if end > 0 else value[1:]
+    return re.split(r"\s+#", value, maxsplit=1)[0].strip()
+
+
+class ConfigError(ValueError):
+    """A value in .env / environment is invalid; message names the setting."""
 
 
 def _path(value: str, base: Path) -> Path:
@@ -151,9 +170,26 @@ def load_settings(
     def get(key: str, default: str) -> str:
         return env.get(f"IV4_{key}", default)
 
+    def _num(conv, key: str, default: str):
+        raw = get(key, default)
+        try:
+            return conv(raw)
+        except ValueError:
+            raise ConfigError(
+                f"IV4_{key}={raw!r} is not a valid {'number' if conv is float else 'whole number'} "
+                f"- fix it in .env") from None
+
+    def _f(key: str, default: str) -> float:
+        return _num(float, key, default)
+
+    def _i(key: str, default: str) -> int:
+        return _num(int, key, default)
+
+    def _fo(key: str) -> float | None:
+        return _f(key, "") if get(key, "").strip() else None
+
     data_dir = _path(get("DATA_DIR", "data"), base)
 
-    conf_th = get("CONFIDENCE_THRESHOLD", "")
 
     return Settings(
         data_dir=data_dir,
@@ -164,39 +200,39 @@ def load_settings(
         archive_dir=_path(get("ARCHIVE_DIR", str(data_dir / "archive")), base),
         database_path=_path(get("DATABASE_PATH", str(data_dir / "database" / "iv4.db")), base),
         log_dir=_path(get("LOG_DIR", "logs"), base),
-        scan_interval=float(get("SCAN_INTERVAL", "1.0")),
-        settle_seconds=float(get("SETTLE_SECONDS", "1.5")),
-        group_timeout=float(get("GROUP_TIMEOUT", "120")),
-        expected_images=int(get("EXPECTED_IMAGES", "1")),
-        expected_texts=int(get("EXPECTED_TEXTS", "1")),
+        scan_interval=_f("SCAN_INTERVAL", "1.0"),
+        settle_seconds=_f("SETTLE_SECONDS", "1.5"),
+        group_timeout=_f("GROUP_TIMEOUT", "120"),
+        expected_images=_i("EXPECTED_IMAGES", "1"),
+        expected_texts=_i("EXPECTED_TEXTS", "1"),
         verify_images=get("VERIFY_IMAGES", "true").lower() in {"1", "true", "yes"},
         use_polling=get("USE_POLLING", "false").lower() in {"1", "true", "yes"},
-        workers=int(get("WORKERS", "0")),
-        batch_size=int(get("BATCH_SIZE", "200")),
+        workers=_i("WORKERS", "0"),
+        batch_size=_i("BATCH_SIZE", "200"),
         date_format=get("DATE_FORMAT", "%d/%m/%Y"),
         sensor_id=get("SENSOR_ID", "IV4-01") or None,
         sensors=tuple(x.strip() for x in get("SENSORS", "").split(",") if x.strip()),
         machine_id=get("MACHINE_ID", "") or None,
-        score_threshold=float(get("SCORE_THRESHOLD", "")) if get("SCORE_THRESHOLD", "") else None,
-        confidence_threshold=float(conf_th) if conf_th else None,
-        retention_ok_days=int(get("RETENTION_OK_DAYS", "0")),
-        retention_ng_days=int(get("RETENTION_NG_DAYS", "0")),
-        retention_rows_days=int(get("RETENTION_ROWS_DAYS", "0")),
-        cleanup_interval=float(get("CLEANUP_INTERVAL", "3600")),
-        min_free_gb=float(get("MIN_FREE_GB", "20")),
+        score_threshold=_fo("SCORE_THRESHOLD"),
+        confidence_threshold=_fo("CONFIDENCE_THRESHOLD"),
+        retention_ok_days=_i("RETENTION_OK_DAYS", "0"),
+        retention_ng_days=_i("RETENTION_NG_DAYS", "0"),
+        retention_rows_days=_i("RETENTION_ROWS_DAYS", "0"),
+        cleanup_interval=_f("CLEANUP_INTERVAL", "3600"),
+        min_free_gb=_f("MIN_FREE_GB", "20"),
         disk_prune_ok=get("DISK_PRUNE_OK", "true").lower() in {"1", "true", "yes"},
-        disk_check_interval=float(get("DISK_CHECK_INTERVAL", "300")),
+        disk_check_interval=_f("DISK_CHECK_INTERVAL", "300"),
         upload_enabled=get("UPLOAD_ENABLED", "false").lower() in {"1", "true", "yes"},
         upload_statuses=_statuses(get("UPLOAD_STATUSES", "FAIL,UNKNOWN")),
         upload_backend=get("UPLOAD_BACKEND", "gdrive").lower(),
-        upload_interval=float(get("UPLOAD_INTERVAL", "30")),
-        upload_batch=int(get("UPLOAD_BATCH", "50")),
+        upload_interval=_f("UPLOAD_INTERVAL", "30"),
+        upload_batch=_i("UPLOAD_BATCH", "50"),
         gdrive_auth=get("GDRIVE_AUTH", "oauth").lower(),
         gdrive_credentials=_path(get("GDRIVE_CREDENTIALS", "credentials/client_secret.json"), base),
         gdrive_token=_path(get("GDRIVE_TOKEN", "credentials/token.json"), base),
         gdrive_folder_id=get("GDRIVE_FOLDER_ID", ""),
         gdrive_root_name=get("GDRIVE_ROOT_NAME", "IV4 Data Agent"),
         log_level=get("LOG_LEVEL", "INFO").upper(),
-        log_max_bytes=int(get("LOG_MAX_BYTES", str(10 * 1024 * 1024))),
-        log_backup_count=int(get("LOG_BACKUP_COUNT", "10")),
+        log_max_bytes=_i("LOG_MAX_BYTES", "10485760"),
+        log_backup_count=_i("LOG_BACKUP_COUNT", "10"),
     )

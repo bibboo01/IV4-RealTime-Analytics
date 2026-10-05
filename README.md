@@ -152,7 +152,8 @@ iv4-data-agent/
 │
 ├── app/
 │   ├── __init__.py
-│   ├── __main__.py          # python -m app
+│   ├── __main__.py          # python -m app  (= run)
+│   ├── cli.py               # คำสั่ง start/check/status/metrics/...
 │   ├── config.py            # settings จาก .env / env vars
 │   ├── logging_setup.py     # rotating log
 │   ├── pipeline.py
@@ -205,6 +206,7 @@ iv4-data-agent/
 │   ├── backup_db.py
 │   ├── metrics.py           # รายงาน metric / export CSV
 │   ├── benchmark.py         # วัดว่าเครื่องนี้รองรับได้กี่ sensor
+│   ├── bootstrap.py         # ติดตั้งครั้งแรก (venv, library, .env)
 │   ├── gdrive_auth.py       # ล็อกอิน Google Drive ครั้งเดียว
 │   └── stats.py
 │
@@ -217,6 +219,8 @@ iv4-data-agent/
 │   ├── test_agent.py
 │   └── test_google_drive.py
 │
+├── run.bat                  # คำสั่งเดียว (Windows)
+├── run.sh                   # คำสั่งเดียว (Linux/macOS)
 ├── .env.example
 ├── .gitignore
 ├── requirements.txt
@@ -619,9 +623,9 @@ Retention ลบทีละ folder วัน/สถานะ — เร็ว�
 ตาราง `hourly_stats` / `hourly_tool_stats` อัปเดตทุกครั้งที่บันทึก → ดึง metric ได้ทันทีไม่ว่าข้อมูลจะมีกี่ล้านแถว
 
 ```powershell
-python -m scripts.metrics                                   # วันนี้ รายชั่วโมง
-python -m scripts.metrics --from 2026-10-01 --to 2026-10-08 --by day --csv week.csv
-python -m scripts.metrics --by day --per-sensor              # แยกตาม sensor
+run metrics                                                 # วันนี้ รายชั่วโมง
+run metrics --from 2026-10-01 --to 2026-10-08 --by day --csv week.csv
+run metrics --by day --per-sensor                            # แยกตาม sensor
 ```
 
 | Metric | ความหมาย |
@@ -655,7 +659,7 @@ python -m scripts.metrics --by day --per-sensor              # แยกตา�
 > ตัวเลขข้างบนวัดบน Linux — Windows/NTFS + antivirus จะช้ากว่า **ต้องวัดบน Mini PC จริง**:
 >
 > ```powershell
-> python -m scripts.benchmark --dir D:\iv4-data-agent     # ~2-3 นาที, ไม่แตะข้อมูลจริง
+> run benchmark --dir D:\iv4-data-agent     # ~2-3 นาที, ไม่แตะข้อมูลจริง
 > ```
 >
 > หยุด service ก่อนวัด และให้ `--dir` อยู่บนดิสก์เดียวกับ `data\`
@@ -850,17 +854,37 @@ STATUS : COMPLETE
 
 ---
 
-# 22. Running the System
+# 22. Running the System — คำสั่งเดียว
+
+ต้องมี Python 3.10+ ([python.org](https://www.python.org/downloads/windows/) — ติ๊ก *Add python.exe to PATH*) แล้ว:
 
 ```powershell
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-copy .env.example .env          # ปรับ path / threshold
-python -m app                   # หรือ python -m app.ingestion.watcher
+run
 ```
 
-หยุดด้วย Ctrl+C (ปิดอย่างปลอดภัย)
+หรือ **ดับเบิลคลิก `run.bat`** — ครั้งแรกจะ:
+
+1. สร้าง `.venv` และติดตั้ง library (~10–30 วินาที, ต้องต่อเน็ต) — ครั้งต่อไปข้าม (ติดตั้งใหม่เฉพาะเมื่อ `requirements.txt` เปลี่ยน)
+2. สร้าง `.env` จาก `.env.example` (ไม่เขียนทับของเดิม)
+3. ตรวจความพร้อม (folder, สิทธิ์เขียน, sensor folders, ดิสก์, database, FTP port 21)
+4. เริ่มทำงาน — หยุดด้วย `Ctrl+C`
+
+| คำสั่ง | ทำอะไร |
+| --- | --- |
+| `run` | ติดตั้ง (ถ้ายังไม่ได้) + ตรวจ + เริ่มทำงาน |
+| `run check` | ตรวจความพร้อมอย่างเดียว |
+| `run status` | กำลังทำงานอยู่ไหม, ไฟล์ค้าง, error ล่าสุด, ยอดวันนี้แยก sensor (exit code 1 = ไม่ทำงาน/ผิดปกติ) |
+| `run metrics --by day --per-sensor` | รายงาน metric (`run metrics --help`) |
+| `run benchmark` | วัดว่าเครื่องนี้รองรับได้กี่ sensor |
+| `run gdrive-auth` | ล็อกอิน Google Drive ครั้งเดียว |
+| `run backup` | สำรอง database |
+| `run test` | รัน automated tests |
+| `run service install` | ติดตั้งเป็น Windows Service (PowerShell แบบ Administrator) |
+| `run help` | ดูคำสั่งทั้งหมด |
+
+* เปิดซ้ำไม่ได้: ถ้ามี agent ทำงานอยู่แล้ว (รวมถึง service) จะบอก `Already running` แล้วออก — ไม่เกิดการประมวลผลซ้อน
+* ค่าใน `.env` ผิด (เช่น `IV4_GROUP_TIMEOUT=two minutes`) จะบอกชื่อค่าที่ผิดทันที
+* Linux/macOS ใช้ `./run.sh` คำสั่งเดียวกัน
 
 ---
 
@@ -938,8 +962,7 @@ DONE
 # 25. Testing
 
 ```powershell
-python -m pip install -r requirements-dev.txt
-python -m pytest -q
+run test          # ติดตั้ง pytest ให้อัตโนมัติครั้งแรก
 ```
 
 Test ทั้งหมดใช้ temp folder และ temp database — **ไม่แตะ `data/` จริง**
@@ -949,6 +972,7 @@ Test ทั้งหมดใช้ temp folder และ temp database — **�
 | `tests/test_parsing.py` | TXT parser (UTF-8/UTF-16/cp874), Inspection Record, Analyzer, Matcher |
 | `tests/test_database.py` | Create/Update, ID ซ้ำเก็บประวัติ, Duplicate hash, Migration จาก v1 |
 | `tests/test_metrics.py` (bulk) | batch insert ให้ผล metric เท่ากับทีละแถวทุกตัว (รวม counter reset), action ผสม CREATED/UPDATED/DUPLICATE |
+| `tests/test_cli.py` | คำสั่งเดียว: อ่าน `.env` (comment ท้ายบรรทัด), ค่าผิดบอกชื่อ, กันเปิดซ้ำ, preflight, status |
 | `tests/test_multi_sensor.py` | 2 sensor ชื่อไฟล์ซ้ำ, missing แยก sensor, auto-detect folder, disk guard ลบเฉพาะ OK เก่าสุด |
 | `tests/test_metrics.py` | Metric รายชั่วโมง/วัน, missing จาก Trigger No., NG ตาม Tool, retention, ดิสก์ |
 | `tests/test_google_drive.py` | Upload ลงโครงสร้าง วัน/UID, root folder สร้างครั้งเดียว, เน็ตหลุดแล้ว retry ไม่ซ้ำ, config ผิดไม่ทำให้ service ล่ม |
@@ -975,7 +999,7 @@ data/incoming/
 จากนั้น Run:
 
 ```powershell
-python -m app.ingestion.watcher
+run
 ```
 
 ---
@@ -1137,7 +1161,7 @@ IV4 Data Agent/
 5. บน Mini PC รันครั้งเดียว (เปิด browser ให้ล็อกอิน):
 
    ```powershell
-   python -m scripts.gdrive_auth --test
+   run gdrive-auth --test
    ```
 
    ได้ `credentials/token.json` และ folder `IV4 Data Agent` ใน Drive
@@ -1515,20 +1539,20 @@ Realtime Monitoring และ Historical Analysis
 * Health Check + Windows Event Log — `deploy/healthcheck.ps1`
 * Error Recovery — manifest + retry + startup recovery
 * Log Rotation — `logs/iv4_agent.log`
-* Backup — `python -m scripts.backup_db --keep 30`
-* Summary — `python -m scripts.stats`
+* Backup — `run backup --keep 30`
+* Summary — `run status` / `run metrics`
 
 ---
 
 # 44. Production Deployment Checklist (Mini PC)
 
 1. ติดตั้ง Python 3.11+ และ [NSSM](https://nssm.cc)
-2. `python -m venv .venv` → `pip install -r requirements.txt`
-3. `copy .env.example .env` แล้วตั้ง `IV4_INCOMING_DIR` ให้ตรงกับ folder ที่ IV4/FTP เขียนไฟล์
+2. ดับเบิลคลิก `run.bat` (ติดตั้งให้เอง) แล้วปิดด้วย `Ctrl+C`
+3. แก้ `.env` ที่ถูกสร้างขึ้น: `IV4_INCOMING_DIR`, `IV4_SENSORS`
 4. ถ้าเป็น network share ตั้ง `IV4_USE_POLLING=true`
-5. `python -m pytest -q` ต้องผ่านทั้งหมดบนเครื่องจริง
-6. ทดสอบมือ: `python -m app` แล้ววางไฟล์ตัวอย่างจาก `tests/mock_data/`
-7. Admin PowerShell: `.\deploy\install_service.ps1 -Nssm C:\tools\nssm\win64\nssm.exe`
+5. `run test` ต้องผ่านทั้งหมดบนเครื่องจริง และ `run check` ต้องขึ้น READY
+6. ทดสอบมือ: `run` แล้ววางไฟล์ตัวอย่างจาก `tests/mock_data/iv4/` ลง `incoming\IV4-01\` → `run status`
+7. Admin PowerShell: `.\run.bat service install -Nssm C:\tools\nssm\win64\nssm.exe`
 8. Task Scheduler:
    * ทุก 5 นาที: `powershell -File deploy\healthcheck.ps1`
    * ทุกวัน: `.venv\Scripts\python.exe -m scripts.backup_db --keep 30` (ควร copy `backups/` ออกนอกเครื่อง)

@@ -4,10 +4,10 @@ On-site benchmark: how many IV4 sensors can THIS machine handle?
 Runs on the Mini PC itself (Windows/NTFS, antivirus, real disk) in a
 temporary folder - production data, database and service are not touched.
 
-    python -m scripts.benchmark                  # both tests, ~2 minutes
-    python -m scripts.benchmark --max            # only: maximum throughput
-    python -m scripts.benchmark --sensors 4      # only: real-time test with 4 sensors
-    python -m scripts.benchmark --dir E:\\bench   # put the test on another disk
+    run benchmark                  # both tests, ~2 minutes
+    run benchmark --max            # only: maximum throughput
+    run benchmark --sensors 4      # only: real-time test with 4 sensors
+    run benchmark --dir E:\\bench   # put the test on another disk
 
 Stop the IV4DataAgent service first for a clean number (it competes for CPU/disk).
 Put --dir on the SAME disk as IV4_INCOMING_DIR / IV4_ARCHIVE_DIR so the

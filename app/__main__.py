@@ -1,3 +1,5 @@
-from app.ingestion.watcher import main
+import sys
 
-main()
+from app.cli import main
+
+sys.exit(main())
