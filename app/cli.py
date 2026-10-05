@@ -8,6 +8,7 @@ IV4 Data Agent - one command for everything.
     run metrics [...]       production metrics (see: run metrics --help)
     run benchmark [...]     how many sensors can this machine handle
     run gdrive-auth         one-time Google Drive sign-in
+    run sheets              publish the Google Sheets dashboard once and print its link
     run backup              online database backup
     run test                run the automated tests
     run service install     install as Windows service (admin PowerShell)
@@ -184,9 +185,10 @@ def preflight(s: Settings) -> list[tuple[str, str]]:
     else:
         add(WARN, "nothing listening on port 21 - is FileZilla Server running? (sensors cannot send)")
 
-    if s.upload_enabled and s.upload_backend == "gdrive" and s.gdrive_auth == "oauth":
+    wants_google = (s.upload_enabled and s.upload_backend == "gdrive") or s.sheets_enabled
+    if wants_google and s.gdrive_auth == "oauth":
         if not (s.gdrive_token and s.gdrive_token.exists()):
-            add(WARN, "Google Drive upload enabled but not signed in - run: run gdrive-auth")
+            add(WARN, "Google Drive/Sheets enabled but not signed in - run: run gdrive-auth")
 
     pid = InstanceLock(s.log_dir).running_pid()
     if pid:
@@ -290,6 +292,28 @@ def cmd_status(_args, s: Settings) -> int:
     return 0 if healthy else 1
 
 
+def cmd_sheets(_args, s: Settings) -> int:
+    from app.database.repository import DatabaseRepository
+    from app.sheets import publish_once
+    from app.upload.google_drive import DriveConfigError
+
+    repo = DatabaseRepository(s.database_path)
+    try:
+        url = publish_once(s, repo)
+    except DriveConfigError as exc:
+        print(f"Cannot publish: {exc}")
+        return 1
+    except Exception as exc:  # noqa: BLE001
+        print(f"Publish failed: {exc}")
+        return 1
+    finally:
+        repo.dispose()
+    print(f"Dashboard updated: {url}")
+    if not s.sheets_enabled:
+        print("To keep it updating while the agent runs, set IV4_SHEETS_ENABLED=true in .env and restart.")
+    return 0
+
+
 def _monitor(args, s: Settings) -> int:
     from app import monitor
     lock = InstanceLock(s.log_dir)
@@ -338,6 +362,7 @@ COMMANDS = {
     "check": cmd_check,
     "status": cmd_status,
     "monitor": _monitor,
+    "sheets": cmd_sheets,
     "metrics": lambda a, s: _run_module_main("scripts.metrics", "run metrics", a),
     "benchmark": lambda a, s: _run_module_main("scripts.benchmark", "run benchmark", a),
     "gdrive-auth": lambda a, s: _run_module_main("scripts.gdrive_auth", "run gdrive-auth", a),

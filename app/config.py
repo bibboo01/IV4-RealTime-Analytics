@@ -103,6 +103,9 @@ class Settings:
     gdrive_token: Path | None = None         # OAuth refresh token (created by scripts.gdrive_auth)
     gdrive_folder_id: str = ""          # optional; empty = app creates its own root folder
     gdrive_root_name: str = "IV4 Data Agent"
+    sheets_enabled: bool = False        # publish a live summary dashboard to Google Sheets
+    sheets_interval: float = 60.0       # seconds between updates (min 15; API limit is ~60 writes/min)
+    sheets_title: str = "IV4 Dashboard"
 
     # Logging
     log_level: str = "INFO"
@@ -232,6 +235,9 @@ def load_settings(
         gdrive_token=_path(get("GDRIVE_TOKEN", "credentials/token.json"), base),
         gdrive_folder_id=get("GDRIVE_FOLDER_ID", ""),
         gdrive_root_name=get("GDRIVE_ROOT_NAME", "IV4 Data Agent"),
+        sheets_enabled=get("SHEETS_ENABLED", "false").lower() in {"1", "true", "yes"},
+        sheets_interval=max(_f("SHEETS_INTERVAL", "60"), 15.0),
+        sheets_title=get("SHEETS_TITLE", "IV4 Dashboard"),
         log_level=get("LOG_LEVEL", "INFO").upper(),
         log_max_bytes=_i("LOG_MAX_BYTES", "10485760"),
         log_backup_count=_i("LOG_BACKUP_COUNT", "10"),

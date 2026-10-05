@@ -51,10 +51,8 @@ def _q(value: str) -> str:
     return value.replace("\\", "\\\\").replace("'", "\\'")
 
 
-def build_drive_service(settings: Settings):
-    """Create an authenticated Drive v3 client from settings."""
-    from googleapiclient.discovery import build
-
+def load_credentials(settings: Settings):
+    """Credentials for Drive / Sheets from settings (OAuth token or service account)."""
     if settings.gdrive_auth == "service_account":
         from google.oauth2 import service_account
 
@@ -84,8 +82,21 @@ def build_drive_service(settings: Settings):
                 token.write_text(creds.to_json(), encoding="utf-8")
             else:
                 raise DriveConfigError("OAuth token invalid. Re-run: run gdrive-auth")
+    return creds
 
-    return build("drive", "v3", credentials=creds, cache_discovery=False)
+
+def build_drive_service(settings: Settings):
+    """Create an authenticated Drive v3 client from settings."""
+    from googleapiclient.discovery import build
+
+    return build("drive", "v3", credentials=load_credentials(settings), cache_discovery=False)
+
+
+def build_sheets_service(settings: Settings):
+    """Create an authenticated Sheets v4 client (same sign-in as Drive)."""
+    from googleapiclient.discovery import build
+
+    return build("sheets", "v4", credentials=load_credentials(settings), cache_discovery=False)
 
 
 class GoogleDriveUploader:

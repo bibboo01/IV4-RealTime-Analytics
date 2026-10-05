@@ -878,6 +878,7 @@ run
 | `run metrics --by day --per-sensor` | รายงาน metric (`run metrics --help`) |
 | `run benchmark` | วัดว่าเครื่องนี้รองรับได้กี่ sensor |
 | `run gdrive-auth` | ล็อกอิน Google Drive ครั้งเดียว |
+| `run sheets` | สร้าง/อัปเดต Google Sheets Dashboard หนึ่งครั้ง แล้วแสดงลิงก์ |
 | `run backup` | สำรอง database |
 | `run test` | รัน automated tests |
 | `run service install` | ติดตั้งเป็น Windows Service (PowerShell แบบ Administrator) |
@@ -921,6 +922,31 @@ run
 * **Waiting** = ไฟล์ที่รอใน `incoming` — ถ้าเกิน 200 และเพิ่มขึ้นเรื่อย ๆ แปลว่าเครื่องรับไม่ทัน
 * **Missing** ต้องเป็น 0 — ถ้าไม่ใช่ แปลว่า sensor ตรวจแล้วแต่ไฟล์ไม่มาถึงทาง FTP
 * ทุกตัวเลขอ่านจากตารางสรุปรายชั่วโมง + `logs/health.json` จึงเร็วแม้ DB มีหลายล้านแถว
+
+## 22.2 Google Sheets Dashboard (ดู/นำเสนอจากมือถือหรือเครื่องไหนก็ได้)
+
+agent อัปเดต Google Sheet ชื่อ **IV4 Dashboard** (อยู่ในโฟลเดอร์ IV4 Data Agent บน Drive) ทุก 60 วินาที ส่งเฉพาะ **ตัวเลขสรุป** ไม่ส่งรูปหรือรายชิ้น ทำงานใน thread แยก เน็ตหลุดก็ไม่กระทบการรับไฟล์ (จะส่งใหม่เองเมื่อเน็ตกลับมา)
+
+| แท็บ | เนื้อหา |
+| --- | --- |
+| Today | ยอดวันนี้แยก sensor: Total, NG, NG %, Yield, Missing, Avg ms, Run h |
+| Hourly | 48 ชั่วโมงล่าสุด + กราฟยอดตรวจและ NG % |
+| Daily | 30 วันล่าสุด + กราฟ NG % |
+| Tools | NG แยกตาม Tool วันนี้ |
+| Latest NG | NG 20 ชิ้นล่าสุด |
+| Status | heartbeat, ไฟล์ค้าง, error, ดิสก์ |
+
+**ตั้งค่า (ครั้งเดียว)**
+1. เชื่อม Google Drive ให้สำเร็จก่อน (`run gdrive-auth --test`, ข้อ 34)
+2. ใน Google Cloud Console (โปรเจกต์เดียวกัน) เปิด **APIs & Services → Library → Google Sheets API → Enable**
+3. ทดลองสร้าง: `run sheets` จะขึ้น `Dashboard updated: https://docs.google.com/spreadsheets/d/...` เปิดลิงก์นั้นได้เลย
+4. ให้อัปเดตเองตลอด: ตั้ง `IV4_SHEETS_ENABLED=true` ใน `.env` แล้ว restart (ปรับรอบได้ที่ `IV4_SHEETS_INTERVAL`, ต่ำสุด 15 วินาที)
+5. แชร์: กด Share ใน Google Sheets ตามปกติ
+
+* ใช้สิทธิ์เดิม (`drive.file`) ไม่ต้องล็อกอินใหม่ agent เห็นเฉพาะ Sheet ที่ตัวเองสร้าง
+* ถ้าลบ Sheet ทิ้ง agent จะสร้างใหม่ให้เองรอบถัดไป (ลิงก์เปลี่ยน) ถ้าอยากย้ายหรือเปลี่ยนชื่อไฟล์ ทำได้ตามปกติ ลิงก์ไม่เปลี่ยน
+* ดูสถานะที่ `run monitor` บรรทัด `Sheets` ถ้ามี error จะขึ้นใน ALERTS เช่น ยังไม่ได้เปิด Sheets API
+* **ตรวจนโยบายบริษัทก่อน** ว่าอนุญาตให้ส่งยอดผลิตขึ้น Google ได้
 
 ---
 
