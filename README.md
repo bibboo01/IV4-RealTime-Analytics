@@ -2,8 +2,124 @@
 
 ระบบสำหรับรับข้อมูล Inspection จาก **KEYENCE IV4 G500CA** แบบอัตโนมัติ โดยรับไฟล์จาก Sensor ได้แก่ Image (`JPG/JPEG`) และข้อมูลผลการตรวจสอบ (`TXT`) จากนั้นทำการจับคู่ข้อมูล, Parse ข้อมูล, วิเคราะห์ผล และบันทึกลงฐานข้อมูล
 
-> **Current Status:** Core Realtime Pipeline พร้อม Production (hardened, 28 automated tests) — รอทดสอบกับข้อมูลจริงจาก IV4  
-> **Google Drive Integration:** พร้อมใช้งาน (ปิดไว้เป็นค่าเริ่มต้น — ตั้ง `IV4_UPLOAD_ENABLED=true` หลังเชื่อมบัญชี)
+> **Current Status:** Core Realtime Pipeline พร้อม Production (hardened, 134 automated tests) — รองรับ sensor หลายตัว, Live monitor ใน terminal, Google Drive + Google Sheets Dashboard, ติดตั้งและรันด้วยคำสั่งเดียว (`run`, `run production`)  
+> **เริ่มใช้งาน:** ดูหัวข้อ **ติดตั้งและรัน** ด้านล่าง  
+> **Google Drive / Sheets:** พร้อมใช้งาน (ปิดไว้เป็นค่าเริ่มต้น — ตั้ง `IV4_UPLOAD_ENABLED=true` / `IV4_SHEETS_ENABLED=true` ใน `.env` หลังเชื่อมบัญชี)
+
+---
+
+# ติดตั้งและรัน (เริ่มจากศูนย์)
+
+> ใช้เวลาประมาณ 15 นาที ทำบน **Mini PC (Windows 10/11)** ที่ sensor ส่งไฟล์มาหา · Linux/macOS ใช้ `./run.sh` แทน `run` ได้ทุกคำสั่ง
+
+## สิ่งที่ต้องมี
+
+| อะไร | หมายเหตุ |
+| --- | --- |
+| **Python 3.10 ขึ้นไป** | [python.org](https://www.python.org/downloads/windows/) ตอนติดตั้งต้องติ๊ก *Add python.exe to PATH* |
+| **FTP Server (FileZilla Server)** | ให้ sensor ส่งไฟล์เข้ามา (ตั้งค่าในขั้น 3) |
+| อินเทอร์เน็ต | ตอนติดตั้งครั้งแรก (โหลด library) และตอนใช้ Google Drive/Sheets เท่านั้น |
+| พื้นที่ดิสก์ | ประมาณ 16 GB ต่อชั่วโมงที่เครื่องเดิน (รูป 2 sensor) + DB ~1 GB ต่อวัน — ดูข้อ 14.3 |
+| NSSM (ไม่บังคับ) | ถ้าอยากได้ Windows Service จริง ไม่มีก็ใช้ Task Scheduler แทนได้ (ข้อ 44) |
+
+## ขั้นที่ 1 — เอาโปรเจกต์ไปไว้ที่เครื่อง
+
+ก๊อปโฟลเดอร์โปรเจกต์ไปไว้ เช่น `D:\iv4-data-agent` (หรือ `git clone https://github.com/bibboo01/IV4-RealTime-Analytics D:\iv4-data-agent` — ถ้ายังไม่ได้ merge PR เข้า `main` ให้เพิ่ม `-b production-hardening` เพื่อได้โค้ดเวอร์ชันล่าสุด) แล้วเปิด Command Prompt / PowerShell ในโฟลเดอร์นั้น
+
+## ขั้นที่ 2 — รันครั้งแรก (ติดตั้งให้เองทั้งหมด)
+
+```powershell
+run
+```
+
+(หรือดับเบิลคลิก `run.bat`) ครั้งแรกระบบจะ: สร้าง `.venv` → ติดตั้ง library → สร้างไฟล์ **`.env`** → สร้าง folder ต่าง ๆ → ตรวจความพร้อม → เริ่มทำงาน หยุดด้วย `Ctrl+C` ถ้าขึ้นว่าหา Python ไม่เจอ แปลว่ายังไม่ได้ติ๊ก *Add to PATH* ตอนติดตั้ง Python
+
+## ขั้นที่ 3 — ตั้งค่า
+
+**3.1 ไฟล์ `.env`** — ระบบอ่านค่าจาก **`.env` เท่านั้น** (ไม่อ่าน `.env.example` ซึ่งเป็นแค่แม่แบบ) เปิดด้วย Notepad แล้วแก้ที่สำคัญ (แก้แล้วต้อง restart agent):
+
+| ค่า | ตั้งเป็น |
+| --- | --- |
+| `IV4_SENSORS` | ชื่อ sensor คั่นด้วยจุลภาค เช่น `IV4-01,IV4-02` (1 sensor = 1 โฟลเดอร์ย่อยใน `incoming`) |
+| `IV4_DATE_FORMAT` | `%d/%m/%Y` (วัน/เดือน/ปี) หรือ `%m/%d/%Y` ให้ตรงกับที่ sensor เขียนใน TXT |
+| `IV4_INCOMING_DIR` / `IV4_ARCHIVE_DIR` | ปกติไม่ต้องแก้ ถ้ามีดิสก์ใหญ่ให้ชี้ `IV4_ARCHIVE_DIR` ไปที่นั่น (ควรอยู่ไดรฟ์เดียวกับ `incoming`) |
+| `IV4_RETENTION_OK_DAYS` / `IV4_RETENTION_NG_DAYS` | จำนวนวันที่เก็บรูป (0 = ไม่ลบเอง ระบบลบรูป OK เก่าสุดเองเมื่อดิสก์เหลือต่ำกว่า `IV4_MIN_FREE_GB`) |
+| `IV4_USE_POLLING` | `true` ถ้า `incoming` เป็น network share |
+| `IV4_UPLOAD_ENABLED` | `true` เมื่อต้องการอัปโหลดขึ้น Google Drive (ค่าเริ่มต้นปิด) |
+| `IV4_SHEETS_ENABLED` | `true` เมื่อต้องการ Google Sheets Dashboard (ค่าเริ่มต้นปิด) |
+
+**3.2 FTP Server (FileZilla) + Sensor** (รายละเอียดข้อ 14.2)
+* โหมดโปรโตคอลต้องรองรับ FTP ธรรมดา: *Explicit FTP over TLS **and insecure plain FTP*** (sensor ไม่รองรับ TLS)
+* สร้าง user ต่อ sensor (เช่น `iv4_01`, `iv4_02`) แล้ว mount `/` → `D:\iv4-data-agent\data\incoming\IV4-01` (และ `IV4-02`) สิทธิ์ Read + Write
+* ใน IV-SmartNavigator ของแต่ละ sensor: ตั้ง FTP ปลายทางเป็น IP ของ Mini PC, user/password ของ sensor นั้น, โฟลเดอร์ปลายทางเป็น `/` (ไม่ใช่ `D:\...`), เลือก Passive mode, และตั้งให้ส่งทุกชิ้น (Good + NG)
+* ใน Windows Firewall เปิด TCP 21 และช่วงพอร์ต passive (`run production` ทำให้ในขั้นที่ 6)
+
+## ขั้นที่ 4 — ตรวจความพร้อม
+
+```powershell
+run check
+```
+
+ต้องขึ้น `READY` (บรรทัด WARN บอกสิ่งที่ควรดู เช่น FileZilla ยังไม่เปิดพอร์ต 21)
+
+## ขั้นที่ 5 — ทดสอบการรับข้อมูล
+
+1. เปิด agent: `run` (ค้างไว้หน้าต่างหนึ่ง)
+2. เปิดอีกหน้าต่าง: `run monitor` — ให้ sensor ส่งไฟล์ แล้วดู Speed, ยอดวันนี้ และ Missing (ต้องเป็น 0)
+3. ทดสอบโดยไม่ใช้ sensor: ก๊อปไฟล์ตัวอย่างจาก `tests\mock_data\iv4\` ไปวางใน `data\incoming\IV4-01\` แล้วดู `run status`
+
+## ขั้นที่ 6 — ตั้งให้พร้อม production (ทำครั้งเดียว)
+
+เปิด Command Prompt แบบ **Run as administrator** ที่โฟลเดอร์โปรเจกต์:
+
+```powershell
+run production --dry-run                  # ดูก่อนว่าจะทำอะไร ไม่แก้อะไร
+run production --passive 50000-50100      # ทำจริง (ใส่ช่วงพอร์ต passive ตามที่ตั้งใน FileZilla)
+```
+
+จะตั้ง Firewall (เฉพาะวง LAN), ยกเว้น Defender, ไม่ให้เครื่อง sleep, เปิด agent เองตอนบูตและ restart เมื่อ crash, ตรวจสุขภาพทุก 5 นาที และ backup DB ทุกวัน 02:00 (รายละเอียดข้อ 44) หลังจากนี้ไม่ต้องเปิด `run` เอง
+
+## ขั้นที่ 7 — Google Drive / Sheets (ไม่บังคับ)
+
+1. ทำตามข้อ 34 (สร้าง OAuth client แบบ Desktop app, เก็บเป็น `credentials\client_secret.json`, Publish app หรือเพิ่ม Test user)
+2. `run gdrive-auth --test` ล็อกอินครั้งเดียว (อย่าปิดหน้าต่างจนขึ้น `Saved token`)
+3. แก้ `.env`: `IV4_UPLOAD_ENABLED=true` (อัปโหลดรูป NG) และ/หรือ `IV4_SHEETS_ENABLED=true` (Dashboard — ต้องเปิด Google Sheets API ด้วย, ข้อ 22.2) แล้ว restart agent
+4. ไม่ขึ้น? รัน `run upload` ระบบจะบอกสาเหตุและวิธีแก้ · เปลี่ยน Gmail: `run gdrive-switch --test`
+
+## ใช้งานประจำวัน
+
+| อยากรู้/ทำอะไร | คำสั่ง |
+| --- | --- |
+| ดูสถานะสดใน terminal | `run monitor` |
+| สรุปสั้น ๆ (ทำงานอยู่ไหม, ยอดวันนี้) | `run status` |
+| รายงาน/ส่งออก Excel | `run metrics --by day --per-sensor --csv report.csv` |
+| Dashboard บน Google Sheets | `run sheets` (หรือเปิดลิงก์ที่ได้) |
+| ตรวจว่าทำไมไม่อัปโหลด | `run upload` |
+| สำรอง database | `run backup` |
+
+## อัปเดตเวอร์ชัน
+
+1. `run backup` (สำรองก่อน)
+2. ดึงโค้ดใหม่ (`git pull` หรือก๊อปทับ) **โดยไม่ลบ** `.env`, `credentials\`, `data\`, `logs\`, `backups\`
+3. restart agent (หรือรัน `run` ใหม่) — library ถูกติดตั้งใหม่เฉพาะเมื่อ `requirements.txt` เปลี่ยน และ database อัปเกรดโครงสร้างให้เองโดยข้อมูลเดิมอยู่ครบ
+
+## ถอนการติดตั้ง
+
+หยุด agent แล้วลบ task/service: `schtasks /delete /tn IV4DataAgent /f` (และ `IV4Healthcheck`, `IV4Backup`) หรือ `run service uninstall` ถ้าใช้ NSSM, ลบกฎ firewall `netsh advfirewall firewall delete rule name=IV4-FTP` จากนั้นลบโฟลเดอร์โปรเจกต์ (ถ้าจะเก็บข้อมูลให้ก๊อป `data\` และ `backups\` ไว้ก่อน)
+
+## ปัญหาที่เจอบ่อย
+
+| อาการ | สาเหตุที่เจอบ่อย → วิธีแก้ |
+| --- | --- |
+| Sensor ขึ้น *Failed to login* | FileZilla บังคับ TLS (เปลี่ยนเป็น *…and insecure plain FTP*), user ไม่มี mount `/` ที่มีสิทธิ์ Read+Write, Firewall ไม่เปิด TCP 21/passive, โฟลเดอร์ปลายทางใน sensor ไม่ใช่ `/` |
+| `run check` ขึ้น FAIL | อ่านบรรทัด FAIL: ส่วนใหญ่คือโฟลเดอร์เขียนไม่ได้หรือ `.env` ผิดค่า (ระบบบอกชื่อค่าที่ผิด) |
+| `run monitor` ขึ้น STOPPED | agent ไม่ได้ทำงาน → `run` หรือตรวจ Task/Service `IV4DataAgent` |
+| `Waiting` เพิ่มขึ้นเรื่อย ๆ | เครื่องรับไม่ทัน → ยกเว้น Defender (`run production`), ใช้ SSD, `run benchmark` (หยุด agent ก่อน) |
+| `Missing` ไม่เป็น 0 | sensor ตรวจแล้วแต่ไฟล์ไม่มาถึง → ตรวจ FTP/ความเร็วเครือข่าย/ตั้ง sensor ให้ส่งทุกชิ้น |
+| วันที่/เวลาใน metric ผิด | `IV4_DATE_FORMAT` ไม่ตรงกับ sensor (ดู `Time and Date` ใน TXT) |
+| ไม่อัปโหลดขึ้น Drive | `run upload` — ที่พบบ่อย: `IV4_UPLOAD_ENABLED` ยังเป็น `false`, มีแต่ชิ้น OK (ส่งเฉพาะ NG เป็นค่าเริ่มต้น), แก้ `.env` แล้วไม่ restart |
+| Google ขึ้น 403 access_denied | Publish app หรือเพิ่ม Gmail เป็น Test user ใน OAuth consent screen |
+| แก้ `.env.example` แล้วไม่มีผล | ต้องแก้ `.env` (ไฟล์จริง) |
 
 ---
 
@@ -153,10 +269,16 @@ iv4-data-agent/
 ├── app/
 │   ├── __init__.py
 │   ├── __main__.py          # python -m app  (= run)
-│   ├── cli.py               # คำสั่ง start/check/status/metrics/...
+│   ├── cli.py               # คำสั่ง start/check/status/monitor/...
 │   ├── config.py            # settings จาก .env / env vars
 │   ├── logging_setup.py     # rotating log
 │   ├── pipeline.py
+│   ├── metrics.py           # metric รายชั่วโมง/วัน (อ่านจากตารางสรุป)
+│   ├── monitor.py           # run monitor: หน้าจอสดใน terminal
+│   ├── sheets.py            # Google Sheets Dashboard
+│   ├── diagnose.py          # run upload: ตรวจว่าทำไมไม่อัปโหลด
+│   ├── production.py        # run production: ตั้งเครื่อง Windows ให้พร้อมใช้งานจริง
+│   ├── maintenance.py       # retention + disk guard
 │   │
 │   ├── ingestion/
 │   │   ├── __init__.py
@@ -198,9 +320,9 @@ iv4-data-agent/
 ├── logs/
 │
 ├── deploy/
-│   ├── install_service.ps1
+│   ├── install_service.ps1  # Windows Service ด้วย NSSM
 │   ├── uninstall_service.ps1
-│   └── healthcheck.ps1
+│   └── healthcheck.ps1      # health check (Event Log)
 │
 ├── scripts/
 │   ├── backup_db.py
@@ -217,7 +339,11 @@ iv4-data-agent/
 │   ├── test_parsing.py
 │   ├── test_database.py
 │   ├── test_agent.py
-│   └── test_google_drive.py
+│   ├── test_google_drive.py
+│   ├── test_sheets.py
+│   ├── test_production.py
+│   ├── test_diagnose.py
+│   └── test_cli.py          # + test_metrics / test_multi_sensor / test_database
 │
 ├── run.bat                  # คำสั่งเดียว (Windows)
 ├── run.sh                   # คำสั่งเดียว (Linux/macOS)
@@ -1039,10 +1165,13 @@ Test ทั้งหมดใช้ temp folder และ temp database — **�
 | `tests/test_parsing.py` | TXT parser (UTF-8/UTF-16/cp874), Inspection Record, Analyzer, Matcher |
 | `tests/test_database.py` | Create/Update, ID ซ้ำเก็บประวัติ, Duplicate hash, Migration จาก v1 |
 | `tests/test_metrics.py` (bulk) | batch insert ให้ผล metric เท่ากับทีละแถวทุกตัว (รวม counter reset), action ผสม CREATED/UPDATED/DUPLICATE |
-| `tests/test_cli.py` | คำสั่งเดียว: อ่าน `.env` (comment ท้ายบรรทัด), ค่าผิดบอกชื่อ, กันเปิดซ้ำ, preflight, status |
+| `tests/test_cli.py` | คำสั่งเดียว: อ่าน `.env` (comment ท้ายบรรทัด), ค่าผิดบอกชื่อ, กันเปิดซ้ำ, preflight, status, `run monitor`, `gdrive-switch/logout` |
 | `tests/test_multi_sensor.py` | 2 sensor ชื่อไฟล์ซ้ำ, missing แยก sensor, auto-detect folder, disk guard ลบเฉพาะ OK เก่าสุด |
 | `tests/test_metrics.py` | Metric รายชั่วโมง/วัน, missing จาก Trigger No., NG ตาม Tool, retention, ดิสก์ |
-| `tests/test_google_drive.py` | Upload ลงโครงสร้าง วัน/UID, root folder สร้างครั้งเดียว, เน็ตหลุดแล้ว retry ไม่ซ้ำ, config ผิดไม่ทำให้ service ล่ม |
+| `tests/test_google_drive.py` | Upload ลงโครงสร้าง วัน/UID, root folder สร้างครั้งเดียว, เน็ตหลุดแล้ว retry ไม่ซ้ำ, config ผิดไม่ทำให้ service ล่ม, ลิงก์ล็อกอินต้องขึ้นแม้เปิด browser ไม่ได้ |
+| `tests/test_sheets.py` | Google Sheets: ตัวเลขในแต่ละแท็บ, สร้าง Sheet/แท็บ/กราฟ, สร้างใหม่ถ้าถูกลบ, อัปเดตต่อหลังเน็ตหลุด, request ตรงกับ schema จริงของ Sheets API |
+| `tests/test_production.py` | `run production`: คำสั่ง firewall/Defender/power, XML ของ Task Scheduler, ข้ามขั้นที่ทำแล้ว, ขั้นที่พลาดไม่หยุดขั้นถัดไป, dry-run ไม่แก้อะไร |
+| `tests/test_diagnose.py` | `run upload`: ปิดอยู่/ยังไม่ล็อกอิน/มีแต่ OK/agent เก่ากว่า `.env`/แปล error ของ Google เป็นวิธีแก้ |
 | `tests/test_agent.py` | End-to-end: ไฟล์ครบ/ไม่ครบ, counter reset, backlog ตอน startup, timeout, invalid, JPG เสีย, DB ล่มแล้ว retry, upload queue, watcher จริง 20 inspection |
 
 ---
@@ -1143,8 +1272,11 @@ Pipeline      PASS
 | Crash Recovery         | PASS       |
 | Rotating Log + Health  | PASS       |
 | Windows Service script | READY      |
+| Live monitor (`run monitor`) | PASS (ทดสอบบน Linux) |
+| Google Sheets Dashboard | READY (ปิดไว้จนกว่าจะเชื่อมบัญชี) |
+| Production setup (`run production`) | READY (ยังไม่ได้ยืนยันบน Windows จริง) |
 | Google Drive Upload    | READY (ปิดไว้จนกว่าจะเชื่อมบัญชี) |
-| Real IV4 Data          | PASS (5 ไฟล์จริง, OK เท่านั้น) |
+| Real IV4 Data          | PASS (5 ไฟล์จริง, OK เท่านั้น — รอตัวอย่าง NG จริง) |
 
 ---
 
@@ -1617,7 +1749,7 @@ Realtime Monitoring และ Historical Analysis
 
 ## ทำครั้งเดียวด้วยคำสั่งเดียว
 
-1. ติดตั้ง Python 3.11+ แล้วก๊อปโปรเจกต์ไปไว้ เช่น `D:\iv4-data-agent`
+1. ติดตั้ง Python 3.10+ แล้วก๊อปโปรเจกต์ไปไว้ เช่น `D:\iv4-data-agent` (ขั้นตอนเต็มตั้งแต่ต้นอยู่ที่หัวข้อ **ติดตั้งและรัน** ต้นเอกสาร)
 2. ดับเบิลคลิก `run.bat` หนึ่งครั้ง (ติดตั้ง library + สร้าง `.env`) แล้วปิดด้วย `Ctrl+C`
 3. แก้ `.env`: `IV4_SENSORS=IV4-01,IV4-02` (และ `IV4_RETENTION_*` ถ้าต้องการนโยบายลบรูป)
 4. เปิด Command Prompt แบบ **Run as administrator** ที่โฟลเดอร์โปรเจกต์ แล้วพิมพ์
@@ -1650,14 +1782,16 @@ Realtime Monitoring และ Historical Analysis
 
 # 45. Current Limitations / Next Step
 
-ต้องทำก่อนเปิดใช้งานจริงเต็มรูปแบบ:
+ที่ทำแล้ว: รูปแบบ TXT จริง, ส่งทุกชิ้น (Good + NG), 2 sensor แยก folder, retention + disk guard, Live monitor, Google Drive, Google Sheets, `run production`
 
-1. **ข้อมูลจริงจาก IV4** — ✅ รองรับรูปแบบ TXT จริงแล้ว (ข้อ 12) — ยังต้องยืนยันว่า **ชื่อไฟล์รูปตรงกับ TXT** และขอตัวอย่าง **NG จริง**
-2. **ส่งทุกชิ้น** — ระบบรองรับแล้ว (ข้อ 14) ต้องตั้ง sensor ให้ส่งทุกชิ้น, เตรียม storage และตั้ง retention; ตรวจ `missing` = 0
-3. **Retention** — ยังไม่มีการ archive/ลบรูปเก่า; ประเมินขนาดรูป × จำนวนต่อวัน แล้วกำหนดนโยบาย
-4. **Online Storage** — Google Drive พร้อมแล้ว ต้องสร้าง OAuth client + รัน `scripts.gdrive_auth` บน Mini PC (ข้อ 34)
-5. **Multi-camera** — ถ้า IV4 หลายตัวเขียนลง folder เดียวกันด้วยเลขเดียวกัน ต้องแยก folder หรือใส่ prefix กล้องในชื่อไฟล์
-6. Dashboard / Data Analysis
+ที่ยังต้องทำ/ยืนยัน:
+
+1. **ตัวอย่าง NG จริง** — ตอนนี้ทดสอบ NG ด้วยไฟล์ที่สร้างขึ้นเอง (`SYNTHETIC_NG_*`) และยังต้องยืนยันว่าชื่อไฟล์รูปตรงกับ TXT
+2. **ตั้ง sensor ให้ส่งทุกชิ้น** แล้วตรวจว่า `Missing` = 0 ใน `run monitor` (ข้อ 14)
+3. **Retention** — ระบบรองรับแล้ว (`IV4_RETENTION_*`, disk guard) ต้องกำหนดนโยบายตามพื้นที่ดิสก์จริงและชั่วโมงเดินเครื่อง
+4. **Google Drive / Sheets** — ต้องล็อกอินบน Mini PC ครั้งเดียว (ข้อ 34) ไม่ขึ้น → `run upload`
+5. **ยังไม่ได้ยืนยันบน Windows จริง:** `run production` และ `run monitor` (ทดสอบแล้วบน Linux) ให้ใช้ `run production --dry-run` ดูก่อน
+6. **Dashboard บนเว็บ / Data Analysis เชิงลึก** — ยังไม่ทำ (ตอนนี้มี terminal monitor, Google Sheets และ CSV)
 
 ---
 
@@ -1681,11 +1815,14 @@ Current:
 │ Realtime Pipeline        ✅          │
 │ End-to-End Mock Test     ✅          │
 │                                      │
-│ Real IV4 Data            ⏳          │
+│ Real IV4 Data            ✅ (OK) ⏳ NG │
+│ Multi-sensor + Full rate ✅          │
+│ Live Monitor (terminal)  ✅          │
 │ Google Drive             ✅ (รอเชื่อม) │
-│ Data Analysis            🔜          │
-│ Dashboard                🔜          │
-│ Production Deployment    🔜          │
+│ Google Sheets Dashboard  ✅ (รอเชื่อม) │
+│ Production Setup         ✅ (รอทดสอบ Win)│
+│ Web Dashboard            🔜          │
+│ Data Analysis เชิงลึก      🔜          │
 │                                      │
 └──────────────────────────────────────┘
 ```
@@ -1716,4 +1853,4 @@ Database
 
 โดยผ่าน End-to-End Mock Test แล้ว
 
-ขั้นต่อไปคือการนำข้อมูลจริงจาก KEYENCE IV4 G500CA เข้ามาทดสอบ เพื่อยืนยันรูปแบบไฟล์และข้อมูลจริง ก่อนพัฒนา Data Analysis, Online Storage และ Dashboard ต่อไป
+ตอนนี้ระบบรับข้อมูลจริงจาก KEYENCE IV4 G500CA ได้ครบทุกชิ้นจาก sensor หลายตัว มี Live monitor, Google Sheets Dashboard และตั้งค่าเครื่องให้พร้อมใช้งานจริงด้วยคำสั่งเดียว ขั้นต่อไปคือยืนยันกับไฟล์ NG จริงและการติดตั้งบน Mini PC แล้วจึงต่อยอดเป็น Web Dashboard และ Data Analysis
