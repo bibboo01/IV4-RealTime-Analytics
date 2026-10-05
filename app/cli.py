@@ -4,6 +4,7 @@ IV4 Data Agent - one command for everything.
     run                     start the agent (checks first; default)
     run check               preflight checks only
     run status              is it running? backlog, errors, today's numbers
+    run monitor             live screen: speed, today per sensor, hourly chart, NG (Ctrl+C quits)
     run metrics [...]       production metrics (see: run metrics --help)
     run benchmark [...]     how many sensors can this machine handle
     run gdrive-auth         one-time Google Drive sign-in
@@ -289,6 +290,12 @@ def cmd_status(_args, s: Settings) -> int:
     return 0 if healthy else 1
 
 
+def _monitor(args, s: Settings) -> int:
+    from app import monitor
+    lock = InstanceLock(s.log_dir)
+    return monitor.run(args, s, lock.running_pid)
+
+
 # ------------------------------------------------------------------
 # pass-through commands
 # ------------------------------------------------------------------
@@ -330,6 +337,7 @@ COMMANDS = {
     "start": cmd_start,
     "check": cmd_check,
     "status": cmd_status,
+    "monitor": _monitor,
     "metrics": lambda a, s: _run_module_main("scripts.metrics", "run metrics", a),
     "benchmark": lambda a, s: _run_module_main("scripts.benchmark", "run benchmark", a),
     "gdrive-auth": lambda a, s: _run_module_main("scripts.gdrive_auth", "run gdrive-auth", a),
