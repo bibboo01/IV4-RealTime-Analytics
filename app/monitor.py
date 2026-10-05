@@ -222,6 +222,14 @@ def render(snap: Snapshot, st: Style, width: int = 80, interval: float | None = 
             if up.get("last_upload_error"):
                 alerts.append(f"upload: {up['last_upload_error'][:w - 20]}")
         add("     ".join(parts))
+        sh = h.get("sheets") or {}
+        if sh.get("enabled"):
+            beat_s = _age(sh.get("last_update_at"))
+            line = " Sheets   " + (f"updated {_dur(beat_s)} ago" if beat_s is not None else "waiting for first update")
+            if sh.get("last_error"):
+                line += "  " + st.red("ERR")
+                alerts.append(f"sheets: {sh['last_error'][:w - 20]}")
+            add(line)
         if low:
             alerts.append("disk space low - oldest OK images are being deleted")
         err_age = _age(h.get("last_error_at"))

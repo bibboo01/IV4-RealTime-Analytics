@@ -89,6 +89,7 @@ class IV4Agent:
         self.stop_event = threading.Event()
         self.wake = threading.Event()
         self.upload_worker = None
+        self.sheets_worker = None
         self.maintenance = None
         self.pool = ThreadPoolExecutor(max_workers=settings.worker_count(), thread_name_prefix="iv4-worker")
         self._last_retry = 0.0
@@ -373,6 +374,10 @@ class IV4Agent:
                 {"enabled": True, "backend": self.settings.upload_backend, **self.upload_worker.stats}
                 if self.upload_worker else {"enabled": False}
             ),
+            "sheets": (
+                {"enabled": True, **self.sheets_worker.stats}
+                if self.sheets_worker else {"enabled": False}
+            ),
         }
         path = self.settings.log_dir / "health.json"
         tmp = path.with_suffix(".tmp")
@@ -404,6 +409,7 @@ class IV4Agent:
         log.info("Upload     : %s", (
             f"{s.upload_backend} ({'ALL' if s.upload_statuses is None else ','.join(sorted(s.upload_statuses))})"
             if s.upload_enabled else "disabled"))
+        log.info("Sheets     : %s", f"every {s.sheets_interval:.0f}s" if s.sheets_enabled else "disabled")
         log.info("=" * 60)
 
         n = self.recover_processing()
@@ -420,6 +426,12 @@ class IV4Agent:
 
             self.upload_worker = UploadWorker(s, self.stop_event)
             self.upload_worker.start()
+
+        if s.sheets_enabled:
+            from app.sheets import SheetsWorker
+
+            self.sheets_worker = SheetsWorker(s, self.stop_event)
+            self.sheets_worker.start()
 
         try:
             while not self.stop_event.is_set():
@@ -439,6 +451,8 @@ class IV4Agent:
                 observer.join(timeout=5)
             if self.upload_worker is not None:
                 self.upload_worker.join(timeout=30)
+            if self.sheets_worker is not None:
+                self.sheets_worker.join(timeout=30)
             if self.maintenance is not None:
                 self.maintenance.join(timeout=30)
             self.write_health()
