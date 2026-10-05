@@ -108,15 +108,19 @@ class IV4Agent:
     # ------------------------------------------------------------
 
     def scan_once(self) -> None:
+        """One pass over incoming/ and every sensor subfolder incoming/<sensor>/."""
         s = self.settings
-        groups = find_groups(s.incoming_dir, s.supported_image_ext, s.supported_text_ext)
+        sources = s.sensor_sources()
+        found: list[tuple[str, Path, str, list[Path]]] = []
+        for sensor, folder in sources:
+            groups = find_groups(folder, s.supported_image_ext, s.supported_text_ext)
+            found += [(sensor, folder, gid, files) for gid, files in groups.items()]
 
-        all_files = {f for files in groups.values() for f in files}
-        self.tracker.prune(all_files)
-
+        self.tracker.prune({f for *_, files in found for f in files})
         now = self.clock()
+        root = s.incoming_dir
 
-        for group_id, files in sorted(groups.items()):
+        for sensor, folder, group_id, files in sorted(found, key=lambda x: (x[0], x[2])):
             if self.stop_event.is_set():
                 return
 
@@ -127,6 +131,9 @@ class IV4Agent:
                 group_id, files, s.supported_image_ext, s.supported_text_ext,
                 s.expected_images, s.expected_texts,
             )
+            status.sensor_id = sensor
+            status.source_dir = folder
+            status.uid_prefix = None if folder == root else sensor
 
             if status.status == COMPLETE and all_stable:
                 self._handle_complete(status)
@@ -147,7 +154,7 @@ class IV4Agent:
                     )
 
     def _quarantine_loose(self, status: GroupStatus, reason: str) -> None:
-        name = make_uid(status.group_id)
+        name = make_uid(status.group_id, sensor=status.uid_prefix)
         quarantine(status.files, self.settings.error_dir, name, reason)
         self.tracker.forget(status.files)
         self._record_error(reason)
@@ -159,7 +166,7 @@ class IV4Agent:
     def _handle_complete(self, status: GroupStatus) -> None:
         s = self.settings
         group_id = status.group_id
-        uid = make_uid(group_id)
+        uid = make_uid(group_id, sensor=status.uid_prefix)
         folder = s.processing_dir / uid
 
         moved: list[Path] = []
@@ -172,7 +179,7 @@ class IV4Agent:
             log.warning("[CLAIM] group=%s not movable yet: %s", group_id, exc)
             for m in moved:
                 try:
-                    move_files([m], s.incoming_dir)
+                    move_files([m], status.source_dir)
                 except OSError:
                     log.exception("[CLAIM] rollback failed for %s", m)
             try:
@@ -185,9 +192,9 @@ class IV4Agent:
 
         image = next((f for f in moved if f.suffix.lower() in s.supported_image_ext), None)
         texts = [f for f in moved if f.suffix.lower() in s.supported_text_ext]
-        manifest = create_manifest(uid, group_id, image or folder, texts, sha)
+        manifest = create_manifest(uid, group_id, image or folder, texts, sha, sensor_id=status.sensor_id)
         save_manifest(manifest, folder)
-        log.info("[CLAIMED] group=%s uid=%s files=%d", group_id, uid, len(moved))
+        log.info("[CLAIMED] sensor=%s group=%s uid=%s files=%d", status.sensor_id, group_id, uid, len(moved))
 
         self._process_folder(folder, manifest)
 
@@ -297,14 +304,19 @@ class IV4Agent:
         self.stats["last_error"] = msg[:500]
 
     def write_health(self) -> None:
-        try:
-            pending = sum(1 for p in self.settings.incoming_dir.iterdir() if p.is_file())
-        except OSError:
-            pending = -1
+        per_sensor = {}
+        for sensor, folder in self.settings.sensor_sources():
+            key = "incoming/ (root)" if folder == self.settings.incoming_dir else sensor
+            try:
+                per_sensor[key] = sum(1 for p in folder.iterdir() if p.is_file())
+            except OSError:
+                per_sensor[key] = -1
+        pending = sum(v for v in per_sensor.values() if v > 0)
         health = {
             **self.stats,
             "heartbeat_at": utc_now(),
             "incoming_files": pending,
+            "incoming_by_sensor": per_sensor,
             "incoming_dir": str(self.settings.incoming_dir),
             "database": str(self.settings.database_path),
             "disk_free_gb": disk_free_gb(self.settings.archive_dir),
@@ -333,6 +345,8 @@ class IV4Agent:
         log.info("=" * 60)
         log.info("IV4 Data Agent starting")
         log.info("Incoming   : %s", s.incoming_dir)
+        for sensor, folder in s.sensor_sources():
+            log.info("  sensor %-10s <- %s", sensor, folder)
         log.info("Processing : %s", s.processing_dir)
         log.info("Error      : %s", s.error_dir)
         log.info("Database   : %s", s.database_path)
@@ -388,7 +402,7 @@ class IV4Agent:
         cls = PollingObserver if self.settings.use_polling else Observer
         try:
             observer = cls()
-            observer.schedule(_WakeHandler(self.wake), str(self.settings.incoming_dir), recursive=False)
+            observer.schedule(_WakeHandler(self.wake), str(self.settings.incoming_dir), recursive=True)
             observer.start()
             return observer
         except Exception as exc:  # noqa: BLE001

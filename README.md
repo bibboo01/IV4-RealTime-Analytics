@@ -562,50 +562,73 @@ Parser ตรวจรูปแบบอัตโนมัติ (IV4 tab / `key
 | ความเร็ว insert ลง DB | ~700 ชิ้น/วินาที (เผื่อ ~35 เท่า) |
 | Upload NG ขนานไปด้วย | ส่งเฉพาะ NG 36/36, ไม่กระทบการรับข้อมูล |
 
-## 14.2 ปริมาณข้อมูล (ต้องวางแผน storage)
+## 14.2 Sensor 2 ตัว (หรือมากกว่า)
 
-| | ต่อวัน (24 ชม.) | ต่อกะ 8 ชม. |
-| --- | --- | --- |
-| รูป | ~190 GB | ~63 GB |
-| Database | ~1 GB | ~0.3 GB |
-
-ตั้ง `IV4_ARCHIVE_DIR` ไปที่ดิสก์ใหญ่/NAS และตั้ง retention เช่น
+ตัวนับและชื่อไฟล์ของแต่ละ sensor ซ้ำกันได้ (เช่น ทั้งสองตัวสร้าง `00001_05102026_100000.jpg`)
+ถ้าส่งเข้า folder เดียวกันไฟล์จะ **เขียนทับกัน** → **แต่ละ sensor ต้องมี folder ของตัวเอง**
 
 ```text
-IV4_RETENTION_OK_DAYS=3      # รูป OK เก็บ 3 วัน
-IV4_RETENTION_NG_DAYS=180    # รูป NG เก็บ 6 เดือน
-IV4_RETENTION_ROWS_DAYS=90   # แถวรายชิ้นใน DB 90 วัน (metric รายชั่วโมงเก็บตลอด)
+D:\iv4-data-agent\data\incoming\
+├── IV4-01\      <- sensor ตัวที่ 1 ส่งมาที่นี่
+└── IV4-02\      <- sensor ตัวที่ 2 ส่งมาที่นี่
 ```
 
-ระบบเตือนเมื่อดิสก์เหลือน้อยกว่า `IV4_MIN_FREE_GB` (log + `health.json` + `healthcheck.ps1`)
+ตั้งค่า (เลือกแบบใดแบบหนึ่ง):
 
-## 14.3 โครงสร้างไฟล์
+* **FileZilla: user แยกต่อ sensor** (แนะนำ) — user `iv4_01` mount `/` → `...\incoming\IV4-01`, user `iv4_02` → `...\incoming\IV4-02`; ใน IV-SmartNavigator ของแต่ละตัวใส่ user ของตัวเอง โฟลเดอร์ปลายทาง `/`
+* **user เดียว** — mount `/` → `...\incoming` แล้วใน IV-SmartNavigator ตั้งโฟลเดอร์ปลายทาง `/IV4-01` กับ `/IV4-02` (โฟลเดอร์ต้องมีอยู่ก่อน)
+
+`.env`: `IV4_SENSORS=IV4-01,IV4-02` (ชื่อ folder = ชื่อ sensor ใน DB/metric)
+
+ผลทดสอบ: 2 sensor × 20 ชิ้น/วินาที, ชื่อไฟล์ซ้ำกันทุกไฟล์ → เข้า DB ครบ 3,002/3,002, แยก sensor ถูก, `missing` = 0 ทั้งคู่
+
+## 14.3 ปริมาณข้อมูล (ชั่วโมงเดินเครื่องไม่แน่นอน)
+
+คิดต่อ **ชั่วโมงที่เครื่องเดินจริง**:
+
+| | 1 sensor | 2 sensors |
+| --- | --- | --- |
+| รูป | ~8 GB/ชม. | **~16 GB/ชม.** |
+| Database | ~35 MB/ชม. | ~70 MB/ชม. |
+
+เนื่องจากชั่วโมงเดินเครื่องแต่ละวันไม่เท่ากัน ระบบจึงจัดการพื้นที่เองด้วย **disk guard**:
+
+* ดิสก์เหลือน้อยกว่า `IV4_MIN_FREE_GB` → ลบ **รูป OK ที่เก่าที่สุด** ทีละชั่วโมง จนกลับมามีพื้นที่ (เช็กทุก 5 นาที)
+* **รูป NG ไม่ถูกลบโดย disk guard** — ลบเฉพาะตาม `IV4_RETENTION_NG_DAYS`
+* ตัวเลข metric (รายชั่วโมง) ไม่ถูกลบ — ดูย้อนหลังได้เสมอแม้รูปจะถูกลบไปแล้ว
+* `run h` ใน `scripts.metrics` = ชั่วโมงที่เครื่องเดินจริงแต่ละวัน — ใช้วางแผน storage จากข้อมูลจริงได้
+
+ตัวอย่าง: ดิสก์ว่าง 1 TB → เก็บรูป OK ได้ ~60 ชม. เดินเครื่อง (2 sensors) ก่อนเริ่มลบอัตโนมัติ
+
+## 14.4 โครงสร้างไฟล์
 
 ```text
 data/processing/   <- เฉพาะที่กำลังประมวลผล (ปกติว่าง)
 data/archive/
-└── 2026-10-03/          (วันที่ตามเวลา sensor)
-    ├── OK/<uid>/
-    ├── NG/<uid>/
-    └── UNKNOWN/<uid>/
+└── 2026-10-05/                   (วันที่ตามเวลา sensor)
+    ├── OK/10/IV4-01__00001_05102026_100000__<เวลารับ>/   (ชั่วโมง/uid)
+    ├── NG/10/IV4-02__.../
+    └── UNKNOWN/...
 ```
 
 Retention ลบทีละ folder วัน/สถานะ — เร็วและไม่กระทบการรับข้อมูล (ทำใน thread แยก)
 
-## 14.4 Metric สำหรับนำเสนอ
+## 14.5 Metric สำหรับนำเสนอ
 
 ตาราง `hourly_stats` / `hourly_tool_stats` อัปเดตทุกครั้งที่บันทึก → ดึง metric ได้ทันทีไม่ว่าข้อมูลจะมีกี่ล้านแถว
 
 ```powershell
 python -m scripts.metrics                                   # วันนี้ รายชั่วโมง
 python -m scripts.metrics --from 2026-10-01 --to 2026-10-08 --by day --csv week.csv
+python -m scripts.metrics --by day --per-sensor              # แยกตาม sensor
 ```
 
 | Metric | ความหมาย |
 | --- | --- |
 | total / NG / NG % / yield % | นับจากไฟล์ที่ได้รับ |
 | avg ms / max ms | Cycle time จาก `TIME[ms]` |
-| **missing** | `Trigger No.` ที่ sensor นับ แต่ไม่ได้รับไฟล์ — ควรเป็น 0 ถ้า FTP ส่งครบ |
+| **missing** | `Trigger No.` ที่ sensor นับ แต่ไม่ได้รับไฟล์ — ควรเป็น 0 ถ้า FTP ส่งครบ (คิดแยกต่อ sensor) |
+| **run h** | จำนวนชั่วโมงที่เครื่องเดินจริง |
 | NG by tool | Tool ไหนตัด NG เท่าไร, ค่าเฉลี่ย, **lowest OK value** (ระยะห่างก่อนจะเป็น NG) |
 
 > ถ้า `missing` ไม่เป็น 0 แปลว่า sensor/FTP ส่งไม่ทัน — NG % จะคลาดเคลื่อน ต้องแก้ที่การตั้งค่า sensor/เครือข่ายก่อนนำตัวเลขไปใช้
@@ -872,6 +895,7 @@ Test ทั้งหมดใช้ temp folder และ temp database — **�
 | --- | --- |
 | `tests/test_parsing.py` | TXT parser (UTF-8/UTF-16/cp874), Inspection Record, Analyzer, Matcher |
 | `tests/test_database.py` | Create/Update, ID ซ้ำเก็บประวัติ, Duplicate hash, Migration จาก v1 |
+| `tests/test_multi_sensor.py` | 2 sensor ชื่อไฟล์ซ้ำ, missing แยก sensor, auto-detect folder, disk guard ลบเฉพาะ OK เก่าสุด |
 | `tests/test_metrics.py` | Metric รายชั่วโมง/วัน, missing จาก Trigger No., NG ตาม Tool, retention, ดิสก์ |
 | `tests/test_google_drive.py` | Upload ลงโครงสร้าง วัน/UID, root folder สร้างครั้งเดียว, เน็ตหลุดแล้ว retry ไม่ซ้ำ, config ผิดไม่ทำให้ service ล่ม |
 | `tests/test_agent.py` | End-to-end: ไฟล์ครบ/ไม่ครบ, counter reset, backlog ตอน startup, timeout, invalid, JPG เสีย, DB ล่มแล้ว retry, upload queue, watcher จริง 20 inspection |

@@ -22,7 +22,7 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def make_uid(group_id: str, when: datetime | None = None) -> str:
+def make_uid(group_id: str, when: datetime | None = None, sensor: str | None = None) -> str:
     """
     Unique, sortable ID for one physical inspection.
 
@@ -30,7 +30,8 @@ def make_uid(group_id: str, when: datetime | None = None) -> str:
     filename alone is NOT unique. The UID adds the UTC arrival time.
     """
     when = when or datetime.now(timezone.utc)
-    return f"{group_id}__{when.strftime('%Y%m%dT%H%M%S%f')}"
+    prefix = f"{sensor}__" if sensor else ""
+    return f"{prefix}{group_id}__{when.strftime('%Y%m%dT%H%M%S%f')}"
 
 
 def content_hash(files: list[Path]) -> str:
@@ -52,10 +53,12 @@ def create_manifest(
     image_file: Path,
     text_files: list[Path],
     sha256: str,
+    sensor_id: str | None = None,
 ) -> dict:
     return {
         "uid": uid,
         "inspection_id": inspection_id,
+        "sensor_id": sensor_id,
         "image": image_file.name,
         "text_files": sorted(f.name for f in text_files),
         "content_hash": sha256,

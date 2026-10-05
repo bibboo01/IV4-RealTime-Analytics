@@ -54,7 +54,8 @@ class Settings:
 
     # IV4 source
     date_format: str = "%d/%m/%Y"       # 'Time and Date' in the TXT (03/10/2026 = 3 Oct)
-    sensor_id: str | None = None        # stored as camera_id (TXT has no sensor id)
+    sensor_id: str | None = None        # sensor name for files dropped directly in incoming/
+    sensors: tuple[str, ...] = ()       # sensor subfolders incoming/<name>/ ; empty = auto-detect
     machine_id: str | None = None
 
     # Optional extra thresholds (sensor judgement is used by default)
@@ -67,6 +68,8 @@ class Settings:
     retention_rows_days: int = 0        # delete per-inspection DB rows older than N days (hourly stats are kept)
     cleanup_interval: float = 3600.0
     min_free_gb: float = 20.0           # health warning when free disk drops below this
+    disk_prune_ok: bool = True          # when free < min_free_gb delete OLDEST OK images first (NG never)
+    disk_check_interval: float = 300.0
 
     # Online storage (Phase 7)
     upload_enabled: bool = False
@@ -101,8 +104,24 @@ class Settings:
             self.archive_dir,
             self.database_path.parent,
             self.log_dir,
+            *(self.incoming_dir / name for name in self.sensors),
         ):
             d.mkdir(parents=True, exist_ok=True)
+
+    def sensor_sources(self) -> list[tuple[str, Path]]:
+        """
+        (sensor_id, folder) pairs to scan.
+
+        Each IV4 writes into its own subfolder incoming/<sensor>/ (set the
+        FTP destination folder per sensor). Files dropped directly in
+        incoming/ belong to IV4_SENSOR_ID (single-sensor setups).
+        """
+        names = list(self.sensors)
+        if not names and self.incoming_dir.exists():
+            names = sorted(p.name for p in self.incoming_dir.iterdir() if p.is_dir() and not p.name.startswith("."))
+        out = [(self.sensor_id or "IV4", self.incoming_dir)]
+        out += [(n, self.incoming_dir / n) for n in names]
+        return out
 
 
 def _statuses(value: str) -> frozenset[str] | None:
@@ -147,6 +166,7 @@ def load_settings(
         use_polling=get("USE_POLLING", "false").lower() in {"1", "true", "yes"},
         date_format=get("DATE_FORMAT", "%d/%m/%Y"),
         sensor_id=get("SENSOR_ID", "IV4-01") or None,
+        sensors=tuple(x.strip() for x in get("SENSORS", "").split(",") if x.strip()),
         machine_id=get("MACHINE_ID", "") or None,
         score_threshold=float(get("SCORE_THRESHOLD", "")) if get("SCORE_THRESHOLD", "") else None,
         confidence_threshold=float(conf_th) if conf_th else None,
@@ -155,6 +175,8 @@ def load_settings(
         retention_rows_days=int(get("RETENTION_ROWS_DAYS", "0")),
         cleanup_interval=float(get("CLEANUP_INTERVAL", "3600")),
         min_free_gb=float(get("MIN_FREE_GB", "20")),
+        disk_prune_ok=get("DISK_PRUNE_OK", "true").lower() in {"1", "true", "yes"},
+        disk_check_interval=float(get("DISK_CHECK_INTERVAL", "300")),
         upload_enabled=get("UPLOAD_ENABLED", "false").lower() in {"1", "true", "yes"},
         upload_statuses=_statuses(get("UPLOAD_STATUSES", "FAIL,UNKNOWN")),
         upload_backend=get("UPLOAD_BACKEND", "gdrive").lower(),

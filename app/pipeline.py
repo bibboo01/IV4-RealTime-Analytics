@@ -30,20 +30,26 @@ class PipelineResult:
     status: str            # PASS / FAIL / UNKNOWN
     action: str            # CREATED / UPDATED / DUPLICATE
     database_id: int
-    archive_rel: str       # <YYYY-MM-DD>/<OK|NG|UNKNOWN>/<uid>, relative to archive_dir
+    archive_rel: str       # <YYYY-MM-DD>/<OK|NG|UNKNOWN>/<HH>/<uid>, relative to archive_dir
 
 
 STATUS_FOLDER = {"PASS": "OK", "FAIL": "NG"}
 
 
 def archive_rel_path(uid: str, status: str, timestamp: str | None, created_at: str | None = None) -> str:
-    """Day folder from sensor time (local), else from ingestion time."""
-    day = None
-    if timestamp and len(timestamp) >= 10 and timestamp[4] == "-":
-        day = timestamp[:10]
+    """
+    <YYYY-MM-DD>/<OK|NG|UNKNOWN>/<HH>/<uid> using the sensor's local time
+    (falls back to ingestion time). The hour level keeps every folder small
+    (~72k inspections/hour max for 1 sensor) and lets disk pruning free
+    space one hour at a time.
+    """
+    day = hour = None
+    if timestamp and len(timestamp) >= 13 and timestamp[4] == "-" and timestamp[10] == " ":
+        day, hour = timestamp[:10], timestamp[11:13]
     if day is None:
-        day = (created_at or "")[:10] or datetime.now().strftime("%Y-%m-%d")
-    return f"{day}/{STATUS_FOLDER.get(status, 'UNKNOWN')}/{uid}"
+        fallback = created_at or datetime.now().isoformat()
+        day, hour = fallback[:10], fallback[11:13] or "00"
+    return f"{day}/{STATUS_FOLDER.get(status, 'UNKNOWN')}/{hour}/{uid}"
 
 
 def verify_image(path: Path) -> None:
@@ -77,7 +83,7 @@ def run_pipeline(
             inspection_id=inspection_id,
             date_format=settings.date_format,
             machine_id=settings.machine_id,
-            camera_id=settings.sensor_id,
+            camera_id=manifest.get("sensor_id") or settings.sensor_id,
         )
     except Exception as exc:  # noqa: BLE001
         raise PipelineError("PARSER", str(exc)) from exc

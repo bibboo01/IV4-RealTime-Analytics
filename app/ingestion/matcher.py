@@ -45,6 +45,9 @@ class GroupStatus:
     image_files: list[Path] = field(default_factory=list)
     text_files: list[Path] = field(default_factory=list)
     reason: str = ""
+    sensor_id: str | None = None
+    source_dir: Path | None = None
+    uid_prefix: str | None = None
 
     @property
     def files(self) -> list[Path]:
