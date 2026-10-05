@@ -14,6 +14,13 @@ Then on the Mini PC (needs a browser once):
     run gdrive-auth          # sign in, saves credentials/token.json
     run gdrive-auth --test     # also upload a small test file
 
+Changing the Google account:
+
+    run gdrive-switch --test   # forget the old account, sign in with the new one
+    run gdrive-logout          # forget the account only (token + saved Drive/Sheets ids)
+
+Stop the agent first. The old account's files stay in its Drive.
+
 The agent then refreshes the token automatically.
 """
 from __future__ import annotations
@@ -26,13 +33,47 @@ from app.config import load_settings
 from app.upload.google_drive import OAUTH_SCOPES, GoogleDriveUploader
 
 
+def state_files(s) -> list[Path]:
+    """Everything tied to the signed-in account: token + saved Drive folder / Sheet ids."""
+    base = s.gdrive_token.parent
+    return [s.gdrive_token, base / "drive_state.json", base / "sheets_state.json"]
+
+
+def forget_account(s) -> list[str]:
+    removed = []
+    for f in state_files(s):
+        if f.exists():
+            f.unlink()
+            removed.append(f.name)
+    return removed
+
+
+def _agent_running(s) -> str | None:
+    from app.cli import InstanceLock
+    return InstanceLock(s.log_dir).running_pid()
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--switch", action="store_true", help="forget the current Google account, then sign in again")
+    ap.add_argument("--logout", action="store_true", help="forget the current Google account and exit")
     ap.add_argument("--test", action="store_true", help="upload a test file after sign-in")
     ap.add_argument("--no-browser", action="store_true", help="print the URL instead of opening a browser")
     args = ap.parse_args()
 
     s = load_settings()
+
+    if args.switch or args.logout:
+        if s.gdrive_auth != "oauth":
+            raise SystemExit("Only for OAuth sign-in (IV4_GDRIVE_AUTH=oauth).")
+        pid = _agent_running(s)
+        if pid:
+            raise SystemExit(f"The agent is running (pid {pid}). Stop it first, then run this again.")
+        removed = forget_account(s)
+        print("Forgot the previous Google account: " + (", ".join(removed) if removed else "nothing was saved"))
+        if args.logout:
+            print("Sign in again with: run gdrive-auth --test")
+            return
 
     if s.gdrive_auth == "oauth":
         from google_auth_oauthlib.flow import InstalledAppFlow
@@ -57,6 +98,11 @@ def main() -> None:
         print(f"Saved token -> {s.gdrive_token}")
 
     up = GoogleDriveUploader(s)
+    try:
+        user = up.service.about().get(fields="user(emailAddress,displayName)").execute(num_retries=3)["user"]
+        print(f"Signed in as: {user.get('displayName', '')} <{user.get('emailAddress', '?')}>")
+    except Exception as exc:  # noqa: BLE001 - informational only
+        print(f"(could not read the account name: {exc})")
     root = up.root_id()
     print(f"Drive root folder id: {root}")
     print(f"Open: https://drive.google.com/drive/folders/{root}")

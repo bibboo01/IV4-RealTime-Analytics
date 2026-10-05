@@ -8,6 +8,8 @@ IV4 Data Agent - one command for everything.
     run metrics [...]       production metrics (see: run metrics --help)
     run benchmark [...]     how many sensors can this machine handle
     run gdrive-auth         one-time Google Drive sign-in
+    run gdrive-switch       change Google account (forget the old one, sign in again)
+    run gdrive-logout       forget the Google account
     run sheets              publish the Google Sheets dashboard once and print its link
     run backup              online database backup
     run test                run the automated tests
@@ -366,6 +368,8 @@ COMMANDS = {
     "metrics": lambda a, s: _run_module_main("scripts.metrics", "run metrics", a),
     "benchmark": lambda a, s: _run_module_main("scripts.benchmark", "run benchmark", a),
     "gdrive-auth": lambda a, s: _run_module_main("scripts.gdrive_auth", "run gdrive-auth", a),
+    "gdrive-switch": lambda a, s: _run_module_main("scripts.gdrive_auth", "run gdrive-switch", ["--switch", *a]),
+    "gdrive-logout": lambda a, s: _run_module_main("scripts.gdrive_auth", "run gdrive-logout", ["--logout", *a]),
     "backup": lambda a, s: _run_module_main("scripts.backup_db", "run backup", a),
     "test": cmd_test,
     "service": cmd_service,
