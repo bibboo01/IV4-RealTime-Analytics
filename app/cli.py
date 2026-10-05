@@ -13,6 +13,7 @@ IV4 Data Agent - one command for everything.
     run sheets              publish the Google Sheets dashboard once and print its link
     run backup              online database backup
     run test                run the automated tests
+    run production          prepare this Windows PC for production (admin; --dry-run to preview)
     run service install     install as Windows service (admin PowerShell)
     run service uninstall
 
@@ -294,6 +295,11 @@ def cmd_status(_args, s: Settings) -> int:
     return 0 if healthy else 1
 
 
+def cmd_production(args, s: Settings) -> int:
+    from app import production
+    return production.main(args, s)
+
+
 def cmd_sheets(_args, s: Settings) -> int:
     from app.database.repository import DatabaseRepository
     from app.sheets import publish_once
@@ -373,6 +379,7 @@ COMMANDS = {
     "backup": lambda a, s: _run_module_main("scripts.backup_db", "run backup", a),
     "test": cmd_test,
     "service": cmd_service,
+    "production": cmd_production,
 }
 
 

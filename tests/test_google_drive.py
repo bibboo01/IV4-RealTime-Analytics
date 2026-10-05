@@ -189,3 +189,56 @@ def test_worker_uploads_in_background(settings, repo, clock, drive):
     stop.set()
     w.join(timeout=5)
     assert w.stats["uploaded"] == 2 and w.stats["pending"] == 0
+
+
+def test_sign_in_prints_link_and_does_not_block_on_browser(monkeypatch, capsys):
+    """Regression: webbrowser.open() blocking used to hide the link and leave 'run gdrive-switch' looking stuck."""
+    import time
+    import urllib.request
+    from urllib.parse import parse_qs, urlparse
+
+    from google_auth_oauthlib.flow import InstalledAppFlow
+
+    import scripts.gdrive_auth as ga
+
+    flow = InstalledAppFlow.from_client_config(
+        {"installed": {"client_id": "id", "client_secret": "secret", "redirect_uris": ["http://localhost"],
+                       "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                       "token_uri": "https://oauth2.googleapis.com/token"}}, ga.OAUTH_SCOPES)
+    opened = []
+    release = threading.Event()
+
+    def blocking_open(url, new=0):
+        opened.append(url)
+        release.wait(30)                     # a browser launch that never returns
+    monkeypatch.setattr(ga.webbrowser, "open", blocking_open)
+    monkeypatch.setattr(flow, "fetch_token", lambda **kw: {"access_token": "t"})
+    monkeypatch.setattr(type(flow), "credentials", property(lambda self: "CREDS"))
+
+    result = {}
+    t = threading.Thread(target=lambda: result.update(creds=ga.sign_in(flow)), daemon=True)
+    t.start()
+    link = None
+    for _ in range(100):                     # the link must appear even though the browser call is stuck
+        out = capsys.readouterr().out
+        if "https://accounts.google.com/o/oauth2/auth" in out:
+            link = next(w for w in out.split() if w.startswith("https://accounts.google.com"))
+            break
+        time.sleep(0.05)
+    assert link, "sign-in link was not printed"
+    assert opened and opened[0] == link
+    q = parse_qs(urlparse(link).query)
+    urllib.request.urlopen(f"{q['redirect_uri'][0]}?state={q['state'][0]}&code=abc", timeout=5).read()
+    t.join(timeout=5)
+    release.set()
+    assert result["creds"] == "CREDS"
+
+
+def test_sign_in_no_browser_mode_still_prints_link(capsys):
+    import scripts.gdrive_auth as ga
+
+    class Flow:
+        def run_local_server(self, **kw):
+            assert kw["open_browser"] is False and "{url}" in kw["authorization_prompt_message"]
+            return "CREDS"
+    assert ga.sign_in(Flow(), open_browser=False) == "CREDS"

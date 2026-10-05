@@ -33,3 +33,4 @@ logs/
 .idea/
 .DS_Store
 Thumbs.db
+deploy/_task_*.xml

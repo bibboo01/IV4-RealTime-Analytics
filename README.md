@@ -883,6 +883,7 @@ run
 | `run sheets` | สร้าง/อัปเดต Google Sheets Dashboard หนึ่งครั้ง แล้วแสดงลิงก์ |
 | `run backup` | สำรอง database |
 | `run test` | รัน automated tests |
+| `run production` | **เตรียมเครื่องให้พร้อม production** ครั้งเดียว (Administrator) ดูหัวข้อ 44 · `--dry-run` = ดูก่อนไม่แก้อะไร |
 | `run service install` | ติดตั้งเป็น Windows Service (PowerShell แบบ Administrator) |
 | `run help` | ดูคำสั่งทั้งหมด |
 
@@ -1611,18 +1612,36 @@ Realtime Monitoring และ Historical Analysis
 
 # 44. Production Deployment Checklist (Mini PC)
 
-1. ติดตั้ง Python 3.11+ และ [NSSM](https://nssm.cc)
-2. ดับเบิลคลิก `run.bat` (ติดตั้งให้เอง) แล้วปิดด้วย `Ctrl+C`
-3. แก้ `.env` ที่ถูกสร้างขึ้น: `IV4_INCOMING_DIR`, `IV4_SENSORS`
-4. ถ้าเป็น network share ตั้ง `IV4_USE_POLLING=true`
-5. `run test` ต้องผ่านทั้งหมดบนเครื่องจริง และ `run check` ต้องขึ้น READY
-6. ทดสอบมือ: `run` แล้ววางไฟล์ตัวอย่างจาก `tests/mock_data/iv4/` ลง `incoming\IV4-01\` → `run status`
-7. Admin PowerShell: `.\run.bat service install -Nssm C:\tools\nssm\win64\nssm.exe`
-8. Task Scheduler:
-   * ทุก 5 นาที: `powershell -File deploy\healthcheck.ps1`
-   * ทุกวัน: `.venv\Scripts\python.exe -m scripts.backup_db --keep 30` (ควร copy `backups/` ออกนอกเครื่อง)
-9. ตั้ง Windows Update / Power plan ไม่ให้เครื่อง sleep และกำหนดเวลา restart นอกช่วงผลิต
-10. ตรวจพื้นที่ disk: รูปจาก IV4 สะสมใน `data/processing/` — ต้องมีนโยบาย archive/ลบ (ดูข้อ 45)
+## ทำครั้งเดียวด้วยคำสั่งเดียว
+
+1. ติดตั้ง Python 3.11+ แล้วก๊อปโปรเจกต์ไปไว้ เช่น `D:\iv4-data-agent`
+2. ดับเบิลคลิก `run.bat` หนึ่งครั้ง (ติดตั้ง library + สร้าง `.env`) แล้วปิดด้วย `Ctrl+C`
+3. แก้ `.env`: `IV4_SENSORS=IV4-01,IV4-02` (และ `IV4_RETENTION_*` ถ้าต้องการนโยบายลบรูป)
+4. เปิด Command Prompt แบบ **Run as administrator** ที่โฟลเดอร์โปรเจกต์ แล้วพิมพ์
+   ```
+   run production --dry-run      <- ดูก่อนว่าจะทำอะไรบ้าง (ไม่แก้อะไร)
+   run production --passive 50000-50100      <- ทำจริง (ใส่ช่วงพอร์ต passive ตามที่ตั้งใน FileZilla)
+   ```
+5. ตรวจผล: `run status` และ `run monitor`
+
+`run production` ทำให้ (ทุกขั้นรันซ้ำได้ ขั้นไหนไม่ผ่านจะแจ้งและทำขั้นถัดไปต่อ):
+
+| ขั้น | ทำอะไร |
+| --- | --- |
+| Pre-flight | ตรวจ folder, ดิสก์, database ถ้ามี FAIL จะหยุดและไม่แก้อะไร |
+| Firewall | เปิดรับ FTP (TCP 21 + passive) **เฉพาะจากวง LAN เดียวกัน** ไม่เปิดสู่อินเทอร์เน็ต |
+| Defender | ยกเว้นโฟลเดอร์ data/archive/database (ไม่ให้สแกนทุกไฟล์ที่เข้ามา) ถ้า IT คุมอยู่จะขึ้น WARN ให้ขอ IT ยกเว้นให้ |
+| Power | High performance, ไม่ sleep / hibernate / ปิดดิสก์ |
+| เปิดเองตอนบูต | Windows Service (ถ้าพบ `nssm.exe`) หรือ Task Scheduler (รันเป็น SYSTEM, restart เองเมื่อ crash) |
+| Health check | ทุก 5 นาที เขียนลง Windows Event Log เมื่อผิดปกติ |
+| Backup | ทุกวัน 02:00 เก็บ 30 ชุด (`backups\`) |
+
+หลังจากนั้นสิ่งที่ต้องทำเอง: ตั้ง Windows Update ให้ restart นอกเวลาผลิต, ก๊อป `backups\` ออกนอกเครื่องเป็นระยะ, ถ้าใช้ Google ให้ `run gdrive-auth --test` และตั้ง `IV4_UPLOAD_ENABLED` / `IV4_SHEETS_ENABLED`
+
+* ถ้า incoming เป็น network share ตั้ง `IV4_USE_POLLING=true`
+* ทดสอบมือ: วางไฟล์ตัวอย่างจาก `tests/mock_data/iv4/` ลง `incoming\IV4-01\` → `run status`
+* ทดสอบบนเครื่องจริงก่อนเริ่ม: `run test` (ต้องผ่านทั้งหมด) และ `run benchmark` (หยุด agent ก่อน)
+* ถอนการติดตั้ง: `schtasks /delete /tn IV4DataAgent /f` (และ `IV4Healthcheck`, `IV4Backup`) หรือ `run service uninstall` ถ้าใช้ NSSM, ลบกฎ firewall ด้วย `netsh advfirewall firewall delete rule name=IV4-FTP`
 
 ---
 
