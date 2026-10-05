@@ -51,6 +51,8 @@ class Settings:
     expected_texts: int = 1             # real IV4: 1 image + 1 result TXT
     verify_images: bool = True          # open JPG with Pillow to catch truncation
     use_polling: bool = False           # True for network shares (SMB) where events are unreliable
+    workers: int = 0                    # file-work threads; 0 = auto (2 x CPU cores, max 16)
+    batch_size: int = 200               # inspections per DB transaction
 
     # IV4 source
     date_format: str = "%d/%m/%Y"       # 'Time and Date' in the TXT (03/10/2026 = 3 Oct)
@@ -108,6 +110,11 @@ class Settings:
         ):
             d.mkdir(parents=True, exist_ok=True)
 
+    def worker_count(self) -> int:
+        if self.workers > 0:
+            return self.workers
+        return max(2, min(16, 2 * (os.cpu_count() or 2)))
+
     def sensor_sources(self) -> list[tuple[str, Path]]:
         """
         (sensor_id, folder) pairs to scan.
@@ -164,6 +171,8 @@ def load_settings(
         expected_texts=int(get("EXPECTED_TEXTS", "1")),
         verify_images=get("VERIFY_IMAGES", "true").lower() in {"1", "true", "yes"},
         use_polling=get("USE_POLLING", "false").lower() in {"1", "true", "yes"},
+        workers=int(get("WORKERS", "0")),
+        batch_size=int(get("BATCH_SIZE", "200")),
         date_format=get("DATE_FORMAT", "%d/%m/%Y"),
         sensor_id=get("SENSOR_ID", "IV4-01") or None,
         sensors=tuple(x.strip() for x in get("SENSORS", "").split(",") if x.strip()),

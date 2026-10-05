@@ -154,3 +154,20 @@ def test_disk_guard_never_touches_current_hour_or_ng(tmp_path):
     assert oldest_ok_hours(a, protect="2026-10-05 11") == []
     assert prune_for_space(a, 20, 25, free_fn=lambda p: 1.0, protect="2026-10-05 11") == []
     shutil.rmtree(a)
+
+
+def test_identical_files_from_two_sensors_are_not_duplicates(tmp_path, clock):
+    s = make(tmp_path)
+    repo = DatabaseRepository(s.database_path)
+    try:
+        agent = IV4Agent(s, repo, clock=clock)
+        img = jpeg_bytes()
+        drop(s.incoming_dir / "IV4-01", 1, 5, image=img)
+        drop(s.incoming_dir / "IV4-02", 1, 5, image=img)       # byte-identical
+        settle(agent, clock)
+        assert repo.count() == 2 and agent.stats["duplicates"] == 0
+        drop(s.incoming_dir / "IV4-02", 1, 5, image=img)       # same sensor again -> duplicate
+        settle(agent, clock)
+        assert repo.count() == 2 and agent.stats["duplicates"] == 1
+    finally:
+        repo.dispose()

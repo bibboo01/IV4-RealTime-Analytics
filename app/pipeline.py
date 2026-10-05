@@ -64,13 +64,21 @@ def verify_image(path: Path) -> None:
         raise PipelineError("IMAGE", f"{path.name} is not a valid image ({exc})") from exc
 
 
-def run_pipeline(
-    folder: Path,
-    manifest: dict,
-    repository: DatabaseRepository,
-    settings: Settings,
-) -> PipelineResult:
+@dataclass
+class Prepared:
+    """Everything computed for one inspection before touching the database."""
+    folder: Path
+    manifest: dict
+    record: object
+    analysis: object
+    archive_rel: str
 
+
+def prepare(folder: Path, manifest: dict, settings: Settings) -> Prepared:
+    """
+    Image check + parse + analysis. Pure file/CPU work: safe to run in many
+    worker threads at once. Raises PipelineError on bad input.
+    """
     uid = manifest["uid"]
     inspection_id = manifest["inspection_id"]
 
@@ -101,26 +109,36 @@ def run_pipeline(
         raise PipelineError("ANALYSIS", str(exc)) from exc
 
     archive_rel = archive_rel_path(uid, analysis.status, record.timestamp, manifest.get("created_at"))
+    return Prepared(folder, manifest, record, analysis, archive_rel)
 
+
+def run_pipeline(
+    folder: Path,
+    manifest: dict,
+    repository: DatabaseRepository,
+    settings: Settings,
+) -> PipelineResult:
+    """Single-inspection path (prepare + one DB transaction)."""
+    p = prepare(folder, manifest, settings)
     try:
         saved, action = repository.save_or_update_inspection(
-            record,
-            analysis,
-            uid=uid,
+            p.record,
+            p.analysis,
+            uid=manifest["uid"],
             content_hash=manifest.get("content_hash"),
             image_file=manifest.get("image"),
-            folder=archive_rel,
+            folder=p.archive_rel,
         )
     except Exception as exc:  # noqa: BLE001
         raise PipelineError("DATABASE", str(exc)) from exc
 
     return PipelineResult(
-        uid=uid,
-        inspection_id=record.inspection_id,
-        status=analysis.status,
+        uid=manifest["uid"],
+        inspection_id=p.record.inspection_id,
+        status=p.analysis.status,
         action=action,
         database_id=saved.id,
-        archive_rel=archive_rel,
+        archive_rel=p.archive_rel,
     )
 
 

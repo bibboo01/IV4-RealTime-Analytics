@@ -7,6 +7,7 @@ from pathlib import Path
 
 from sqlalchemy import (
     DateTime,
+    insert,
     PrimaryKeyConstraint,
     delete,
     update,
@@ -153,9 +154,10 @@ def _nmax(col: str) -> str:
 _HOURLY_UPSERT = text(f"""
 INSERT INTO hourly_stats (hour, program_no, sensor_id, total, pass_count, fail_count, unknown_count,
     time_ms_sum, time_ms_count, time_ms_max, trigger_min, trigger_max, trigger_resets, last_trigger, score_min)
-VALUES (:hour, :program_no, :sensor_id, 1, :p, :f, :u, :tms, :tmc, :tmax, :trig, :trig, 0, :trig, :score)
+VALUES (:hour, :program_no, :sensor_id, :total, :p, :f, :u, :tms, :tmc, :tmax, :tmin_trig, :tmax_trig,
+    :resets, :last_trig, :score)
 ON CONFLICT (hour, program_no, sensor_id) DO UPDATE SET
-    total = total + 1,
+    total = total + excluded.total,
     pass_count = pass_count + excluded.pass_count,
     fail_count = fail_count + excluded.fail_count,
     unknown_count = unknown_count + excluded.unknown_count,
@@ -164,9 +166,9 @@ ON CONFLICT (hour, program_no, sensor_id) DO UPDATE SET
     time_ms_max = {_nmax("time_ms_max")},
     trigger_min = {_nmin("trigger_min")},
     trigger_max = {_nmax("trigger_max")},
-    trigger_resets = trigger_resets + CASE
-        WHEN excluded.last_trigger IS NOT NULL AND last_trigger IS NOT NULL
-             AND excluded.last_trigger < last_trigger - 1000 THEN 1 ELSE 0 END,
+    trigger_resets = trigger_resets + excluded.trigger_resets + CASE
+        WHEN :first_trig IS NOT NULL AND last_trigger IS NOT NULL
+             AND :first_trig < last_trigger - 1000 THEN 1 ELSE 0 END,
     last_trigger = COALESCE(excluded.last_trigger, last_trigger),
     score_min = {_nmin("score_min")}
 """)
@@ -174,16 +176,81 @@ ON CONFLICT (hour, program_no, sensor_id) DO UPDATE SET
 _TOOL_UPSERT = text(f"""
 INSERT INTO hourly_tool_stats (hour, program_no, sensor_id, tool_no, tool_name, count, ng_count,
     value_sum, value_count, value_min, ok_value_min)
-VALUES (:hour, :program_no, :sensor_id, :tool_no, :tool_name, 1, :ng, :vsum, :vcnt, :vmin, :okmin)
+VALUES (:hour, :program_no, :sensor_id, :tool_no, :tool_name, :count, :ng, :vsum, :vcnt, :vmin, :okmin)
 ON CONFLICT (hour, program_no, sensor_id, tool_no) DO UPDATE SET
     tool_name = excluded.tool_name,
-    count = count + 1,
+    count = count + excluded.count,
     ng_count = ng_count + excluded.ng_count,
     value_sum = value_sum + excluded.value_sum,
     value_count = value_count + excluded.value_count,
     value_min = {_nmin("value_min")},
     ok_value_min = {_nmin("ok_value_min")}
 """)
+
+
+def _mn(a, b):
+    return b if a is None else a if b is None else min(a, b)
+
+
+def _mx(a, b):
+    return b if a is None else a if b is None else max(a, b)
+
+
+def aggregate_hourly(pairs) -> tuple[list[dict], list[dict]]:
+    """
+    Pre-aggregate (record, analysis) pairs per hour/program/sensor so a batch
+    of 200 inspections becomes a handful of upserts instead of ~600.
+    Order matters for counter-reset detection, so pairs are processed in order.
+    """
+    hours: dict[tuple, dict] = {}
+    tools: dict[tuple, dict] = {}
+    for record, analysis in pairs:
+        key = (_hour_key(record), record.program_no if record.program_no is not None else -1,
+               record.camera_id or "")
+        h = hours.get(key)
+        if h is None:
+            h = hours[key] = dict(hour=key[0], program_no=key[1], sensor_id=key[2], total=0, p=0, f=0, u=0,
+                                  tms=0, tmc=0, tmax=None, tmin_trig=None, tmax_trig=None, resets=0,
+                                  first_trig=None, last_trig=None, score=None)
+        st = analysis.status
+        h["total"] += 1
+        h["p"] += st == "PASS"
+        h["f"] += st == "FAIL"
+        h["u"] += st not in ("PASS", "FAIL")
+        tms = record.inspection_time_ms
+        if tms is not None:
+            h["tms"] += tms
+            h["tmc"] += 1
+            h["tmax"] = _mx(h["tmax"], tms)
+        trig = record.trigger_no
+        if trig is not None:
+            if h["first_trig"] is None:
+                h["first_trig"] = trig
+            elif h["last_trig"] is not None and trig < h["last_trig"] - 1000:
+                h["resets"] += 1
+            h["last_trig"] = trig
+            h["tmin_trig"] = _mn(h["tmin_trig"], trig)
+            h["tmax_trig"] = _mx(h["tmax_trig"], trig)
+        h["score"] = _mn(h["score"], record.score)
+
+        for t in record.tools or []:
+            tk = key + (t.get("no", 0),)
+            v = _num(t.get("value"))
+            ng = (t.get("status") or "").upper() == "NG"
+            g = tools.get(tk)
+            if g is None:
+                g = tools[tk] = dict(hour=key[0], program_no=key[1], sensor_id=key[2], tool_no=tk[3],
+                                     tool_name=None, count=0, ng=0, vsum=0.0, vcnt=0, vmin=None, okmin=None)
+            g["tool_name"] = t.get("name")
+            g["count"] += 1
+            g["ng"] += ng
+            if v is not None:
+                g["vsum"] += v
+                g["vcnt"] += 1
+                g["vmin"] = _mn(g["vmin"], v)
+                if not ng:
+                    g["okmin"] = _mn(g["okmin"], v)
+    return list(hours.values()), list(tools.values())
 
 
 def _num(v):
@@ -294,9 +361,72 @@ class DatabaseRepository:
         Returns (row, action) where action is CREATED, UPDATED or DUPLICATE.
         DUPLICATE = the exact same files were already stored under another uid.
         """
-        uid = uid or record.inspection_id
+        with Session(self.engine, expire_on_commit=False) as session:
+            row, action = self._upsert(session, record, analysis, uid, content_hash, image_file, folder)
+            session.commit()
+            return row, action
 
-        values = dict(
+    def save_batch(self, items: list[dict]) -> list[tuple[int, str]]:
+        """
+        Save many inspections in ONE transaction (group commit), using bulk
+        statements: 2 lookups + 1 multi-row INSERT + a few metric upserts per
+        batch instead of ~5 statements per inspection.
+        items: dicts with record, analysis, uid, content_hash, image_file, folder.
+        Returns [(database_id, action)] in input order. All-or-nothing.
+        """
+        if not items:
+            return []
+        uids = [it["uid"] for it in items]
+        hashes = [it["content_hash"] for it in items if it.get("content_hash")]
+
+        with Session(self.engine, expire_on_commit=False) as session:
+            existing = dict(session.execute(
+                select(Inspection.uid, Inspection.id).where(Inspection.uid.in_(uids))).all())
+            known_hash = {h: (i, u) for h, i, u in session.execute(
+                select(Inspection.content_hash, Inspection.id, Inspection.uid)
+                .where(Inspection.content_hash.in_(hashes))).all()} if hashes else {}
+
+            out: list[tuple[int | None, str] | None] = [None] * len(items)
+            new_rows, new_idx, created_pairs, batch_hash = [], [], [], {}
+            for i, it in enumerate(items):
+                h = it.get("content_hash")
+                if h and h in known_hash and known_hash[h][1] != it["uid"]:
+                    out[i] = (known_hash[h][0], "DUPLICATE")
+                elif h and h in batch_hash:
+                    out[i] = ("pending", batch_hash[h])            # duplicate inside this batch
+                elif it["uid"] in existing:
+                    row, action = self._upsert(session, it["record"], it["analysis"], it["uid"],
+                                               h, it.get("image_file"), it.get("folder"))
+                    session.flush()
+                    out[i] = (row.id, action)
+                else:
+                    if h:
+                        batch_hash[h] = it["uid"]
+                    new_rows.append(dict(uid=it["uid"], content_hash=h, created_at=_utcnow(),
+                                         updated_at=_utcnow(),
+                                         **self._values(it["record"], it["analysis"],
+                                                        it.get("image_file"), it.get("folder"))))
+                    new_idx.append(i)
+                    created_pairs.append((it["record"], it["analysis"]))
+
+            if new_rows:
+                session.execute(insert(Inspection), new_rows)
+                ids = dict(session.execute(
+                    select(Inspection.uid, Inspection.id).where(
+                        Inspection.uid.in_([r["uid"] for r in new_rows]))).all())
+                for i, r in zip(new_idx, new_rows):
+                    out[i] = (ids[r["uid"]], "CREATED")
+                self._write_hourly(session, created_pairs)
+
+            for i, o in enumerate(out):
+                if o and o[0] == "pending":
+                    out[i] = (ids[o[1]], "DUPLICATE")
+            session.commit()
+        return out
+
+    @staticmethod
+    def _values(record, analysis, image_file, folder) -> dict:
+        return dict(
             inspection_id=record.inspection_id,
             timestamp=record.timestamp,
             machine_id=record.machine_id,
@@ -312,8 +442,6 @@ class DatabaseRepository:
             analysis_reason="; ".join(analysis.reasons or [])[:1000],
             image_file=image_file,
             folder=folder,
-            # IV4 rows: everything is already in typed columns + tools_json;
-            # keep raw only when the sensor sent lines we do not map.
             raw_data=(
                 json.dumps(record.raw, ensure_ascii=False, default=str)
                 if record.source_format != "iv4" or record.raw.get("extra")
@@ -326,62 +454,47 @@ class DatabaseRepository:
             source_format=record.source_format,
         )
 
-        with Session(self.engine, expire_on_commit=False) as session:
+    def _upsert(self, session, record, analysis, uid, content_hash, image_file, folder):
+        uid = uid or record.inspection_id
 
-            if content_hash:
-                dup = session.scalar(
-                    select(Inspection).where(
-                        Inspection.content_hash == content_hash,
-                        Inspection.uid != uid,
-                    )
+        values = self._values(record, analysis, image_file, folder)
+
+        if content_hash:
+            dup = session.scalar(
+                select(Inspection).where(
+                    Inspection.content_hash == content_hash,
+                    Inspection.uid != uid,
                 )
-                if dup is not None:
-                    return dup, "DUPLICATE"
+            )
+            if dup is not None:
+                return dup, "DUPLICATE"
 
-            existing = session.scalar(select(Inspection).where(Inspection.uid == uid))
+        existing = session.scalar(select(Inspection).where(Inspection.uid == uid))
 
-            if existing is not None:
-                for k, v in values.items():
-                    setattr(existing, k, v)
-                if content_hash:
-                    existing.content_hash = content_hash
-                session.commit()
-                return existing, "UPDATED"
+        if existing is not None:
+            for k, v in values.items():
+                setattr(existing, k, v)
+            if content_hash:
+                existing.content_hash = content_hash
+            return existing, "UPDATED"
 
-            row = Inspection(uid=uid, content_hash=content_hash, **values)
-            session.add(row)
-            self._update_hourly(session, record, analysis)
-            session.commit()
-            return row, "CREATED"
+        row = Inspection(uid=uid, content_hash=content_hash, **values)
+        session.add(row)
+        self._update_hourly(session, record, analysis)
+        return row, "CREATED"
+
 
     @staticmethod
     def _update_hourly(session: Session, record: InspectionRecord, analysis: AnalysisResult) -> None:
-        key = dict(
-            hour=_hour_key(record),
-            program_no=record.program_no if record.program_no is not None else -1,
-            sensor_id=record.camera_id or "",
-        )
-        st = analysis.status
-        tms = record.inspection_time_ms
-        session.execute(_HOURLY_UPSERT, dict(
-            key,
-            p=int(st == "PASS"), f=int(st == "FAIL"), u=int(st not in ("PASS", "FAIL")),
-            tms=tms or 0, tmc=int(tms is not None), tmax=tms,
-            trig=record.trigger_no, score=record.score,
-        ))
-        for t in record.tools or []:
-            v = _num(t.get("value"))
-            ng = (t.get("status") or "").upper() == "NG"
-            session.execute(_TOOL_UPSERT, dict(
-                key,
-                tool_no=t.get("no", 0), tool_name=t.get("name"), ng=int(ng),
-                vsum=v or 0.0, vcnt=int(v is not None), vmin=v,
-                okmin=v if not ng else None,
-            ))
+        DatabaseRepository._write_hourly(session, [(record, analysis)])
 
-    # Backwards-compatible name
-    def save_inspection(self, record: InspectionRecord, analysis: AnalysisResult) -> Inspection:
-        return self.save_or_update_inspection(record, analysis)[0]
+    @staticmethod
+    def _write_hourly(session: Session, pairs) -> None:
+        hours, tools = aggregate_hourly(pairs)
+        for h in hours:                       # few rows; first_trig needs per-row binding
+            session.execute(_HOURLY_UPSERT, h)
+        if tools:
+            session.execute(_TOOL_UPSERT, tools)
 
     # --------------------------------------------------------
     # Read
