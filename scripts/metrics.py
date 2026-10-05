@@ -4,6 +4,7 @@ Production metrics for reports / presentations.
     python -m scripts.metrics                          # today, per hour
     python -m scripts.metrics --from 2026-10-01 --to 2026-10-08 --by day
     python -m scripts.metrics --by day --csv report.csv   # open in Excel
+    python -m scripts.metrics --by day --per-sensor       # one row per sensor
 
 Times are sensor local time. --to is exclusive.
 """
@@ -28,34 +29,39 @@ def main() -> None:
     ap.add_argument("--to", dest="end", default=(date.today() + timedelta(days=1)).isoformat())
     ap.add_argument("--by", choices=["hour", "day", "month"], default="hour")
     ap.add_argument("--program", type=int)
+    ap.add_argument("--sensor", help="only this sensor (e.g. IV4-01)")
+    ap.add_argument("--per-sensor", action="store_true", help="split rows per sensor")
     ap.add_argument("--csv", help="write period table to this CSV file")
     a = ap.parse_args()
 
     repo = DatabaseRepository(load_settings().database_path)
     try:
-        rows = summarize(repo, a.start, a.end, by=a.by, program_no=a.program)
-        tools = tool_summary(repo, a.start, a.end, program_no=a.program)
+        rows = summarize(repo, a.start, a.end, by=a.by, program_no=a.program,
+                         sensor_id=a.sensor, per_sensor=a.per_sensor)
+        tools = tool_summary(repo, a.start, a.end, program_no=a.program, sensor_id=a.sensor, per_sensor=True)
     finally:
         repo.dispose()
 
     print(f"Period {a.start} .. {a.end} (by {a.by})")
-    hdr = f"{'period':16} {'total':>10} {'NG':>8} {'NG %':>8} {'yield %':>8} {'avg ms':>7} {'max ms':>7} {'missing':>9}"
+    hdr = (f"{'period':16} {'sensor':10} {'total':>10} {'NG':>8} {'NG %':>8} {'yield %':>8} "
+           f"{'avg ms':>7} {'max ms':>7} {'missing':>9} {'run h':>6}")
     print(hdr)
     print("-" * len(hdr))
     tot = {"total": 0, "ng": 0}
     for r in rows:
         tot["total"] += r.total
         tot["ng"] += r.fail_count
-        print(f"{r.period:16} {_fmt(r.total):>10} {_fmt(r.fail_count):>8} {_fmt(r.ng_pct):>8} "
-              f"{_fmt(r.yield_pct):>8} {_fmt(r.avg_time_ms):>7} {_fmt(r.max_time_ms):>7} {_fmt(r.missing):>9}")
+        print(f"{r.period:16} {r.sensor_id or 'all':10} {_fmt(r.total):>10} {_fmt(r.fail_count):>8} "
+              f"{_fmt(r.ng_pct):>8} {_fmt(r.yield_pct):>8} {_fmt(r.avg_time_ms):>7} {_fmt(r.max_time_ms):>7} "
+              f"{_fmt(r.missing):>9} {_fmt(r.active_hours):>6}")
     if tot["total"]:
         print("-" * len(hdr))
-        print(f"{'TOTAL':16} {tot['total']:>10,} {tot['ng']:>8,} {100 * tot['ng'] / tot['total']:>8.2f}")
+        print(f"{'TOTAL':16} {'':10} {tot['total']:>10,} {tot['ng']:>8,} {100 * tot['ng'] / tot['total']:>8.2f}")
 
     if tools:
         print("\nNG by tool")
         for t in tools:
-            print(f"  Tool{t.tool_no:02d} {t.tool_name or '':24} NG {t.ng_count:,}/{t.count:,} ({_fmt(t.ng_pct, '%')})"
+            print(f"  {t.sensor_id or '':10} Tool{t.tool_no:02d} {t.tool_name or '':24} NG {t.ng_count:,}/{t.count:,} ({_fmt(t.ng_pct, '%')})"
                   f"  avg value {_fmt(t.avg_value)}  lowest OK value {_fmt(t.min_ok_value)}")
 
     if a.csv:

@@ -146,7 +146,7 @@ def test_metrics_cli(settings, repo, monkeypatch, capsys, tmp_path):
     main()
     out = capsys.readouterr().out
     assert "2026-10-03" in out and "50.00" in out and "Tool02" in out
-    assert out_csv.read_text(encoding="utf-8-sig").startswith("period,total")
+    assert out_csv.read_text(encoding="utf-8-sig").startswith("period,sensor_id,total")
 
 
 def test_archive_dirs_are_dated(settings, repo, clock):
@@ -156,5 +156,5 @@ def test_archive_dirs_are_dated(settings, repo, clock):
     for _ in range(4):
         agent.scan_once()
         clock.advance(1.1)
-    assert (settings.archive_dir / "2026-09-01" / "OK").is_dir()
+    assert (settings.archive_dir / "2026-09-01" / "OK" / "08").is_dir()
     shutil.rmtree(settings.archive_dir)

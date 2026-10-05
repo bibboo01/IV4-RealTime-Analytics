@@ -34,12 +34,12 @@ def test_complete_inspection_goes_to_db(settings, repo, clock):
     assert repo.count() == 1
     assert list(settings.incoming_dir.iterdir()) == []
     assert _dirs(settings.processing_dir) == []          # in-flight only
-    day = settings.archive_dir / "2026-09-28" / "OK"     # sensor date / status
+    day = settings.archive_dir / "2026-09-28" / "OK" / "15"   # sensor date / status / hour
     (folder,) = _dirs(day)
     assert folder.startswith("007__")
     m = load_manifest(day / folder)
     assert m["status"] == DONE and m["analysis_status"] == "PASS"
-    assert m["archive"] == f"2026-09-28/OK/{folder}"
+    assert m["archive"] == f"2026-09-28/OK/15/{folder}"
     assert repo.get_by_inspection_id("007").folder == m["archive"]
     assert agent.stats["processed"] == 1
 
@@ -147,7 +147,7 @@ def test_database_outage_is_retried_not_quarantined(settings, repo, clock, monke
     assert agent.recover_processing() == 1         # same path used on restart
     assert repo.count() == 1
     assert _dirs(settings.processing_dir) == []
-    assert load_manifest(settings.archive_dir / "2026-09-28" / "OK" / folder)["status"] == DONE
+    assert load_manifest(settings.archive_dir / "2026-09-28" / "OK" / "15" / folder)["status"] == DONE
 
 
 def test_done_but_not_archived_is_finished_on_recovery(settings, repo, clock, monkeypatch):
@@ -160,14 +160,14 @@ def test_done_but_not_archived_is_finished_on_recovery(settings, repo, clock, mo
     monkeypatch.undo()
     agent.recover_processing()
     assert _dirs(settings.processing_dir) == []
-    assert (settings.archive_dir / "2026-09-28" / "OK" / folder / "015.jpg").exists()
+    assert (settings.archive_dir / "2026-09-28" / "OK" / "15" / folder / "015.jpg").exists()
 
 
 def test_ng_goes_to_ng_folder(settings, repo, clock):
     agent = IV4Agent(settings, repo, clock=clock)
     write_inspection(settings.incoming_dir, "016", result="NG")
     _scan_until_settled(agent, clock)
-    assert len(_dirs(settings.archive_dir / "2026-09-28" / "NG")) == 1
+    assert len(_dirs(settings.archive_dir / "2026-09-28" / "NG" / "15")) == 1
 
 
 def test_upload_queue_default_sends_only_ng(settings, repo, clock):
