@@ -211,3 +211,29 @@ def test_gdrive_switch_refuses_while_agent_runs(settings, capsys, monkeypatch):
     assert settings.gdrive_token.exists()                    # nothing deleted
     assert "Stop it first" in capsys.readouterr().out
     assert ga.state_files(settings)[0] == settings.gdrive_token
+
+
+def test_stop_when_not_running(tmp_path, capsys):
+    s = load_settings(base_dir=tmp_path)
+    assert cli.COMMANDS["stop"]([], s) == 0
+    assert "not running" in capsys.readouterr().out
+
+
+def test_stop_asks_running_agent_to_exit(tmp_path, capsys):
+    """`run stop` drops logs/stop.flag; the agent loop sees it and releases the lock."""
+    import threading, time
+    from app.ingestion.watcher import STOP_FLAG
+    s = load_settings(base_dir=tmp_path)
+    lock = cli.InstanceLock(s.log_dir)
+    assert lock.acquire()
+
+    def fake_agent():
+        while not (s.log_dir / STOP_FLAG).exists():
+            time.sleep(0.05)
+        lock.release()
+
+    t = threading.Thread(target=fake_agent)
+    t.start()
+    assert cli.COMMANDS["stop"]([], s) == 0
+    t.join(5)
+    assert "Stopped." in capsys.readouterr().out

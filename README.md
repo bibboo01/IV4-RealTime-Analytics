@@ -92,6 +92,7 @@ run production --passive 50000-50100      # ทำจริง (ใส่ช่�
 | --- | --- |
 | ดูสถานะสดใน terminal | `run monitor` |
 | สรุปสั้น ๆ (ทำงานอยู่ไหม, ยอดวันนี้) | `run status` |
+| หยุดรัน | `run stop` |
 | รายงาน/ส่งออก Excel | `run metrics --by day --per-sensor --csv report.csv` |
 | Dashboard บน Google Sheets | `run sheets` (หรือเปิดลิงก์ที่ได้) |
 | ตรวจว่าทำไมไม่อัปโหลด | `run upload` |
@@ -999,6 +1000,7 @@ run
 | --- | --- |
 | `run` | ติดตั้ง (ถ้ายังไม่ได้) + ตรวจ + เริ่มทำงาน |
 | `run check` | ตรวจความพร้อมอย่างเดียว |
+| `run stop` | **หยุด agent** อย่างปลอดภัย (รอเขียนข้อมูลที่ค้างให้เสร็จ, หยุด Task/Service `IV4DataAgent` ด้วยเพื่อไม่ให้เปิดกลับเอง) ถ้า 60 วินาทียังไม่หยุด ใช้ `run stop --force` |
 | `run status` | กำลังทำงานอยู่ไหม, ไฟล์ค้าง, error ล่าสุด, ยอดวันนี้แยก sensor (exit code 1 = ไม่ทำงาน/ผิดปกติ) |
 | `run monitor` | **หน้าจอ monitor สด** ใน terminal อัปเดตทุก 2 วินาที (ดูหัวข้อถัดไป) |
 | `run metrics --by day --per-sensor` | รายงาน metric (`run metrics --help`) |
