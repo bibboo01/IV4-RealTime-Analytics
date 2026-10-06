@@ -4,6 +4,7 @@ IV4 Data Agent - one command for everything.
     run                     start the agent (checks first; default)
     run check               preflight checks only
     run clear               delete collected data to start from zero (agent must be stopped; asks first)
+    run update <zip>        install a new version from a downloaded ZIP (no git; keeps .env, data, credentials)
     run stop                stop the agent (also the Windows task/service, so it does not restart)
     run status              is it running? backlog, errors, today's numbers
     run monitor             live screen: speed, today per sensor, hourly chart, NG (Ctrl+C quits)
@@ -347,6 +348,11 @@ def cmd_clear(args, s: Settings) -> int:
     return clear.run(args, s, InstanceLock(s.log_dir).running_pid)
 
 
+def cmd_update(args, s: Settings) -> int:
+    from app import update
+    return update.run(args, s, InstanceLock(s.log_dir).running_pid)
+
+
 def cmd_upload(args, s: Settings) -> int:
     from app import diagnose
     return diagnose.run(args, s, InstanceLock(s.log_dir).running_pid)
@@ -428,6 +434,7 @@ COMMANDS = {
     "status": cmd_status,
     "stop": cmd_stop,
     "clear": cmd_clear,
+    "update": cmd_update,
     "monitor": _monitor,
     "sheets": cmd_sheets,
     "metrics": lambda a, s: _run_module_main("scripts.metrics", "run metrics", a),
