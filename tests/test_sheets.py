@@ -165,7 +165,7 @@ def test_first_publish_creates_sheet_tabs_charts_and_values(seeded, gsettings):
     charts = [r for _, reqs in api.batch_updates for r in reqs if "addChart" in r]
     assert len(charts) == 3
     ranges = api.written[sid]
-    assert "'Hourly'!A1:F49" in ranges and "'Today'!A1:I10" in ranges and "'Status'!A1:B18" in ranges
+    assert "'Hourly'!A1:F49" in ranges and "'Today'!A1:I10" in ranges and "'Status'!A1:B19" in ranges
     assert json.loads(gsettings.gdrive_token.parent.joinpath("sheets_state.json").read_text()) == {
         "spreadsheet_id": sid, "charts": True}
 

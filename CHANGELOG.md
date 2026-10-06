@@ -1,0 +1,19 @@
+# Changelog
+
+Version number = `VERSION` file. Show it with `run version`; it also appears in `run monitor`,
+`run status`, the Google Sheets Status tab and `logs/health.json`.
+Rule: x.y.z - z = bug fix, y = new feature (data and settings stay compatible), x = needs manual steps.
+
+## 1.1.0 - 2026-10-06
+- Telegram notifications by work shift (3 shifts of 8 h by default: 08:00-16:00, 16:00-00:00, 00:00-08:00, break optional): shift start, break progress, shift-end summary, and calm alerts while working (no data, 10+ files missing, backlog, disk, upload/Sheets errors; several problems = one message, same alert at most once an hour). `run notify`, `run notify test|chatid|now`. New `.env` settings are optional; nothing to change if you do not use Telegram.
+
+## 1.0.0 - 2026-10-06
+First production release.
+
+- Ingest KEYENCE IV4 jpg+txt via FTP folders into SQLite, hourly statistics, per-sensor folders, archive by day/status/hour
+- `run monitor` live screen (today, last N hours, per-minute LIVE chart, tools, latest NG, alerts, sensor-clock check)
+- Google Drive upload (NG only by default, or ALL) and Google Sheets dashboard; `run upload` diagnosis, `run gdrive-switch`
+- `run production` (Windows task/service, firewall, Defender, power), `run stop`, `run clear`, `run backup`
+- `run update <zip>` updates the program without git and keeps `.env`, `data`, `credentials`
+- Retention waits for pending uploads; `IV4_TIME_OFFSET_HOURS` corrects a wrong sensor clock
+- Missing = files the sensor counted but never arrived (counter-reset hours shown as `*`)

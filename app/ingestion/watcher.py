@@ -55,6 +55,7 @@ from app.ingestion.record import (
 from app.ingestion.stability import StabilityTracker
 from app.maintenance import MaintenanceWorker, disk_free_gb
 from app.pipeline import PipelineError, archive_rel_path, prepare
+from app.version import read_version
 
 log = logging.getLogger("iv4.agent")
 
@@ -92,11 +93,13 @@ class IV4Agent:
         self.wake = threading.Event()
         self.upload_worker = None
         self.sheets_worker = None
+        self.notify_worker = None
         self.maintenance = None
         self.pool = ThreadPoolExecutor(max_workers=settings.worker_count(), thread_name_prefix="iv4-worker")
         self._last_retry = 0.0
 
         self.stats = {
+            "version": read_version(),
             "started_at": utc_now(),
             "processed": 0,
             "pass": 0,
@@ -378,6 +381,10 @@ class IV4Agent:
                  **self.upload_worker.stats}
                 if self.upload_worker else {"enabled": False}
             ),
+            "telegram": (
+                {"enabled": True, **self.notify_worker.stats}
+                if self.notify_worker else {"enabled": False}
+            ),
             "sheets": (
                 {"enabled": True, **self.sheets_worker.stats}
                 if self.sheets_worker else {"enabled": False}
@@ -398,7 +405,7 @@ class IV4Agent:
     def run(self) -> None:
         s = self.settings
         log.info("=" * 60)
-        log.info("IV4 Data Agent starting")
+        log.info("IV4 Data Agent %s starting", read_version())
         log.info("Incoming   : %s", s.incoming_dir)
         for sensor, folder in s.sensor_sources():
             log.info("  sensor %-10s <- %s", sensor, folder)
@@ -413,6 +420,7 @@ class IV4Agent:
         log.info("Upload     : %s", (
             f"{s.upload_backend} ({'ALL' if s.upload_statuses is None else ','.join(sorted(s.upload_statuses))})"
             if s.upload_enabled else "disabled"))
+        log.info("Telegram   : %s", "shift notifications ON" if s.telegram_enabled else "disabled")
         log.info("Sheets     : %s", f"every {s.sheets_interval:.0f}s" if s.sheets_enabled else "disabled")
         log.info("=" * 60)
 
@@ -436,6 +444,11 @@ class IV4Agent:
 
             self.sheets_worker = SheetsWorker(s, self.stop_event)
             self.sheets_worker.start()
+        if s.telegram_enabled and s.telegram_token and s.telegram_chat_id:
+            from app.notify import NotifyWorker
+
+            self.notify_worker = NotifyWorker(s, self.stop_event)
+            self.notify_worker.start()
 
         stop_flag = s.log_dir / STOP_FLAG
         stop_flag.unlink(missing_ok=True)      # leftover from an earlier `run stop`
@@ -464,6 +477,8 @@ class IV4Agent:
                 self.upload_worker.join(timeout=30)
             if self.sheets_worker is not None:
                 self.sheets_worker.join(timeout=30)
+            if self.notify_worker is not None:
+                self.notify_worker.join(timeout=15)
             if self.maintenance is not None:
                 self.maintenance.join(timeout=30)
             self.write_health()
