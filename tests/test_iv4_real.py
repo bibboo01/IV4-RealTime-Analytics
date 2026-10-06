@@ -173,3 +173,26 @@ def test_v2_database_gets_new_columns(tmp_path):
         repo.dispose()
     cols = {r[1] for r in sqlite3.connect(db).execute("PRAGMA table_info(inspection)")}
     assert {"program_no", "trigger_no", "tools_json", "source_format"} <= cols
+
+
+def test_time_offset_moves_hour_and_archive_folder(tmp_path, clock):
+    """Sensor clock 2 h ahead: IV4_TIME_OFFSET_HOURS=-2 files the inspection under the real hour."""
+    from app.pipeline import shift_timestamp
+    assert shift_timestamp("2026-10-03 18:19:13", -2) == "2026-10-03 16:19:13"
+    assert shift_timestamp("2026-10-03 01:30:00", -2) == "2026-10-02 23:30:00"       # crosses midnight
+    assert shift_timestamp("2026-10-03 18:19:13", 0) == "2026-10-03 18:19:13"
+    assert shift_timestamp(None, -2) is None and shift_timestamp("garbage", -2) == "garbage"
+
+    s = load_settings(base_dir=tmp_path, overrides={"IV4_SETTLE_SECONDS": "1.0", "IV4_SCAN_INTERVAL": "0.1",
+                                                    "IV4_TIME_OFFSET_HOURS": "-2"})
+    s.ensure_dirs()
+    repo = DatabaseRepository(s.database_path)
+    try:
+        agent = IV4Agent(s, repo, clock=clock)
+        drop(s.incoming_dir, "00001_03102026_181913")
+        settle(agent, clock)
+        rec = repo.get_by_inspection_id("00001_03102026_181913")
+        assert rec.timestamp == "2026-10-03 16:19:13"
+        assert rec.folder.startswith("2026-10-03/OK/16/")
+    finally:
+        repo.dispose()
