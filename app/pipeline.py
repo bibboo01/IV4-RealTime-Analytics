@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from app.analysis.analyzer import analyze_inspection
@@ -34,6 +34,16 @@ class PipelineResult:
 
 
 STATUS_FOLDER = {"PASS": "OK", "FAIL": "NG"}
+
+
+def shift_timestamp(ts: str | None, hours: float) -> str | None:
+    """'YYYY-MM-DD HH:MM:SS' moved by `hours` (IV4_TIME_OFFSET_HOURS); anything else is returned unchanged."""
+    if not ts or not hours:
+        return ts
+    try:
+        return (datetime.strptime(ts[:19], "%Y-%m-%d %H:%M:%S") + timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return ts
 
 
 def archive_rel_path(uid: str, status: str, timestamp: str | None, created_at: str | None = None) -> str:
@@ -95,6 +105,9 @@ def prepare(folder: Path, manifest: dict, settings: Settings) -> Prepared:
         )
     except Exception as exc:  # noqa: BLE001
         raise PipelineError("PARSER", str(exc)) from exc
+
+    if settings.time_offset_hours:
+        record.timestamp = shift_timestamp(record.timestamp, settings.time_offset_hours)
 
     for w in record.warnings:
         log.warning("[PARSER] uid=%s %s", uid, w)

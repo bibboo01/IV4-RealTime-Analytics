@@ -75,6 +75,7 @@ class Settings:
 
     # IV4 source
     date_format: str = "%d/%m/%Y"       # 'Time and Date' in the TXT (03/10/2026 = 3 Oct)
+    time_offset_hours: float = 0.0      # added to the sensor timestamp (sensor clock 2 h ahead -> -2)
     sensor_id: str | None = None        # sensor name for files dropped directly in incoming/
     sensors: tuple[str, ...] = ()       # sensor subfolders incoming/<name>/ ; empty = auto-detect
     machine_id: str | None = None
@@ -213,6 +214,7 @@ def load_settings(
         workers=_i("WORKERS", "0"),
         batch_size=_i("BATCH_SIZE", "200"),
         date_format=get("DATE_FORMAT", "%d/%m/%Y"),
+        time_offset_hours=_f("TIME_OFFSET_HOURS", "0"),
         sensor_id=get("SENSOR_ID", "IV4-01") or None,
         sensors=tuple(x.strip() for x in get("SENSORS", "").split(",") if x.strip()),
         machine_id=get("MACHINE_ID", "") or None,

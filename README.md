@@ -43,6 +43,7 @@ run
 | `IV4_SENSORS` | ชื่อ sensor คั่นด้วยจุลภาค เช่น `IV4-01,IV4-02` (1 sensor = 1 โฟลเดอร์ย่อยใน `incoming`) |
 | `IV4_DATE_FORMAT` | `%d/%m/%Y` (วัน/เดือน/ปี) หรือ `%m/%d/%Y` ให้ตรงกับที่ sensor เขียนใน TXT |
 | `IV4_INCOMING_DIR` / `IV4_ARCHIVE_DIR` | ปกติไม่ต้องแก้ ถ้ามีดิสก์ใหญ่ให้ชี้ `IV4_ARCHIVE_DIR` ไปที่นั่น (ควรอยู่ไดรฟ์เดียวกับ `incoming`) |
+| `IV4_TIME_OFFSET_HOURS` | ชดเชยเวลา sensor ที่ตั้งผิดและแก้ที่ sensor ไม่ได้ เช่น sensor เร็วกว่าจริง 2 ชม. ใส่ `-2` (มีผลกับไฟล์ใหม่เท่านั้น ข้อมูลเก่าไม่เปลี่ยน; ถ้าแก้นาฬิกาที่ sensor ได้ ให้แก้ที่ sensor แทน) |
 | `IV4_RETENTION_OK_DAYS` / `IV4_RETENTION_NG_DAYS` | จำนวนวันที่เก็บรูป (0 = ไม่ลบเอง ระบบลบรูป OK เก่าสุดเองเมื่อดิสก์เหลือต่ำกว่า `IV4_MIN_FREE_GB`) ถ้าเปิด upload ไว้ ระบบจะรอให้โฟลเดอร์นั้นอัปโหลดเสร็จก่อนค่อยลบ (รอสูงสุดอีก 14 วัน) เช่น `OK=2`, `NG=30` |
 | `IV4_USE_POLLING` | `true` ถ้า `incoming` เป็น network share |
 | `IV4_UPLOAD_ENABLED` | `true` เมื่อต้องการอัปโหลดขึ้น Google Drive (ค่าเริ่มต้นปิด) |

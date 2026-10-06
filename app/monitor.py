@@ -293,7 +293,7 @@ def render(snap: Snapshot, st: Style, width: int = 80, interval: float | None = 
     if snap.pid and off is not None and abs(off) > 120:
         m = int(abs(off) // 60)
         alerts.append(f"sensor clock is {'ahead of' if off > 0 else 'behind'} this PC by {m // 60}h {m % 60:02d}m - "
-                      "all TODAY / hourly numbers use the SENSOR clock (set the sensor clock or ignore the offset)")
+                      "numbers use the SENSOR clock - fix the sensor clock, or set IV4_TIME_OFFSET_HOURS in .env")
 
     # --- today ---------------------------------------------------------
     add("")
