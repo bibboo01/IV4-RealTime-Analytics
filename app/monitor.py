@@ -219,7 +219,8 @@ def render(snap: Snapshot, st: Style, width: int = 80, interval: float | None = 
     alerts: list[str] = []
     h = snap.health or {}
 
-    head = " IV4 Data Agent  -  live monitor"
+    from app.version import read_version
+    head = f" IV4 Data Agent {read_version()}  -  live monitor"
     clock = snap.now.strftime("%Y-%m-%d %H:%M:%S")
     hint = f"refresh {interval:g}s  Ctrl+C quit" if interval else ""
     add(st.bold(head) + " " * max(w - len(head) - len(clock) - 1, 1) + clock)

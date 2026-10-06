@@ -45,7 +45,7 @@ DAYS = 30
 LATEST_NG = 20
 TODAY_ROWS = 10
 TOOL_ROWS = 31
-STATUS_ROWS = 18
+STATUS_ROWS = 19
 
 SHEET_MIME = "application/vnd.google-apps.spreadsheet"
 TABS = ["Today", "Hourly", "Daily", "Tools", "Latest NG", "Status"]
@@ -144,6 +144,7 @@ def build_tables(repo: DatabaseRepository, s: Settings, now: datetime | None = N
     t_status = [["Item", "Value"],
                 ["Dashboard updated", now.strftime("%Y-%m-%d %H:%M:%S") + " (sensor clock / this PC)"],
                 ["Agent heartbeat (UTC)", health.get("heartbeat_at", "-")],
+                ["Program version", health.get("version", "-")],
                 ["Agent started (UTC)", health.get("started_at", "-")],
                 ["Processed since start", health.get("processed", "-")],
                 ["PASS since start", health.get("pass", "-")],

@@ -21,7 +21,7 @@ from pathlib import Path
 from app.config import BASE_DIR, Settings
 
 CODE_DIRS = ("app", "scripts", "deploy", "tests")
-CODE_FILES = ("run.bat", "run.sh", "README.md", "requirements.txt", "requirements-dev.txt",
+CODE_FILES = ("VERSION", "CHANGELOG.md", "run.bat", "run.sh", "README.md", "requirements.txt", "requirements-dev.txt",
               ".env.example", ".gitignore", ".gitattributes")
 SKIP_DIR_NAMES = {"__pycache__", ".pytest_cache"}
 
@@ -126,9 +126,12 @@ def run(args: list[str], s: Settings, running_pid, base: Path | None = None) -> 
             print("The update source is the install folder itself - nothing to do.")
             return 2
 
+        from app.version import read_version
+        old_v, new_v = read_version(base), read_version(root)
         p = plan(root, base)
         total = len(p["new"]) + len(p["changed"]) + len(p["stale"])
         print(f"Update from: {source}")
+        print(f"  version {old_v} -> {new_v}" if old_v != new_v else f"  version {new_v} (same)")
         print(f"  new {len(p['new'])}   changed {len(p['changed'])}   removed (no longer used) {len(p['stale'])}")
         for label, items in (("new", p["new"]), ("changed", p["changed"]), ("removed", p["stale"])):
             for rel in items[:8]:
@@ -146,7 +149,7 @@ def run(args: list[str], s: Settings, running_pid, base: Path | None = None) -> 
         saved = backup_code(base, base / "backups" / f"code-{datetime.now():%Y%m%d-%H%M%S}.zip")
         print(f"Old program saved to {saved}")
         apply(root, base, p)
-        print("Updated. Start again with: run   (new requirements are installed automatically)")
+        print(f"Updated to version {new_v}. Start again with: run   (new requirements are installed automatically)")
         return 0
     finally:
         if tmp:

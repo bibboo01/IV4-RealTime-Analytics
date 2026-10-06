@@ -278,3 +278,14 @@ def _render_without_live(settings):
     finally:
         repo.dispose()
     return "\n".join(monitor.render(snap, monitor.Style(False), 100))
+
+
+def test_version_command_and_places(settings, capsys):
+    from app.config import BASE_DIR
+    shipped = (BASE_DIR / "VERSION").read_text().strip()
+    assert shipped.count(".") == 2 and all(p.isdigit() for p in shipped.split("."))
+    assert cli.COMMANDS["version"]([], settings) == 0
+    assert f"IV4 Data Agent {shipped}" in capsys.readouterr().out
+    assert cli._monitor(["--once", "--no-color"], settings) == 0
+    assert f"IV4 Data Agent {shipped}" in capsys.readouterr().out
+    assert f"## {shipped} " in (BASE_DIR / "CHANGELOG.md").read_text()          # changelog is kept in step

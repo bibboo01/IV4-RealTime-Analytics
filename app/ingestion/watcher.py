@@ -55,6 +55,7 @@ from app.ingestion.record import (
 from app.ingestion.stability import StabilityTracker
 from app.maintenance import MaintenanceWorker, disk_free_gb
 from app.pipeline import PipelineError, archive_rel_path, prepare
+from app.version import read_version
 
 log = logging.getLogger("iv4.agent")
 
@@ -97,6 +98,7 @@ class IV4Agent:
         self._last_retry = 0.0
 
         self.stats = {
+            "version": read_version(),
             "started_at": utc_now(),
             "processed": 0,
             "pass": 0,
@@ -398,7 +400,7 @@ class IV4Agent:
     def run(self) -> None:
         s = self.settings
         log.info("=" * 60)
-        log.info("IV4 Data Agent starting")
+        log.info("IV4 Data Agent %s starting", read_version())
         log.info("Incoming   : %s", s.incoming_dir)
         for sensor, folder in s.sensor_sources():
             log.info("  sensor %-10s <- %s", sensor, folder)

@@ -94,6 +94,7 @@ run production --passive 50000-50100      # ทำจริง (ใส่ช่�
 | ดูสถานะสดใน terminal | `run monitor` |
 | สรุปสั้น ๆ (ทำงานอยู่ไหม, ยอดวันนี้) | `run status` |
 | หยุดรัน | `run clear` | **ล้างข้อมูลเริ่มใหม่** ลบฐานข้อมูล + รูปที่เก็บไว้ (ต้อง `run stop` ก่อน และต้องพิมพ์ `CLEAR` ยืนยัน) ไม่แตะ `.env`, การล็อกอิน Google, backup และไฟล์ที่อยู่บน Drive แล้ว ตัวเลือก: `--dry-run` (ดูก่อนไม่ลบ) `--db-only` `--images-only` `--incoming` `--logs` `--yes` |
+| `run version` | แสดงเลขเวอร์ชันของโปรแกรม (เช่น 1.0.0) เลขเดียวกันนี้ขึ้นที่หัว `run monitor`, บรรทัด Version ใน `run status`, แท็บ Status ใน Google Sheets และ `logs\health.json` รายการสิ่งที่เปลี่ยนในแต่ละเวอร์ชันอยู่ในไฟล์ `CHANGELOG.md` เลขเวอร์ชัน `x.y.z`: z เพิ่ม = แก้บั๊ก, y เพิ่ม = ฟีเจอร์ใหม่ (ข้อมูลและ `.env` เดิมใช้ต่อได้), x เพิ่ม = ต้องทำขั้นตอนเพิ่มด้วยมือ (จะบอกใน CHANGELOG) |
 | `run update <zip>` | **อัปเดตโปรแกรมโดยไม่ต้องใช้ git** ดาวน์โหลด ZIP จาก GitHub (Code > Download ZIP) แล้วสั่ง `run update C:\path\file.zip` จะแทนที่เฉพาะไฟล์โปรแกรม ไม่แตะ `.env`, `data`, `logs`, `credentials`, `backups` และสำรองโปรแกรมเก่าไว้ที่ `backups\code-วันที่.zip` (ต้อง `run stop` ก่อน; `--dry-run` ดูก่อนไม่เปลี่ยน) |
 | `run stop` |
 | รายงาน/ส่งออก Excel | `run metrics --by day --per-sensor --csv report.csv` |

@@ -83,3 +83,15 @@ def test_already_up_to_date(setup, capsys):
     capsys.readouterr()
     assert update.run([str(zpath)], s, lambda: None, base=inst) == 0
     assert "Already up to date" in capsys.readouterr().out
+
+
+def test_update_shows_version_change(setup, capsys):
+    inst, zpath, s = setup
+    (inst / "VERSION").write_text("1.0.0\n")
+    import zipfile as zf
+    with zf.ZipFile(zpath, "a") as z:
+        z.writestr("IV4-RealTime-Analytics-main/VERSION", "1.1.0\n")
+    assert update.run([str(zpath)], s, lambda: None, base=inst) == 0
+    out = capsys.readouterr().out
+    assert "1.0.0 -> 1.1.0" in out and "Updated to version 1.1.0" in out
+    assert (inst / "VERSION").read_text().strip() == "1.1.0"
