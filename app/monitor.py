@@ -25,7 +25,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import text
 
 from app.config import Settings
-from app.metrics import PeriodStats, summarize, tool_summary
+from app.metrics import PeriodStats, miss_text, summarize, tool_summary
 
 BAR = "█"
 HEARTBEAT_STALE_S = 60
@@ -169,7 +169,8 @@ def _sum(rows: list[PeriodStats]) -> PeriodStats | None:
     ok = sum(r.pass_count for r in rows)
     ng = sum(r.fail_count for r in rows)
     times = [(r.avg_time_ms, r.total) for r in rows if r.avg_time_ms is not None]
-    miss = None if any(r.missing is None for r in rows) else sum(r.missing for r in rows)
+    known = [r.missing for r in rows if r.missing is not None]
+    miss = sum(known) if known else None
     return PeriodStats(
         period="", sensor_id="ALL", total=tot, pass_count=ok, fail_count=ng,
         unknown_count=sum(r.unknown_count for r in rows),
@@ -177,6 +178,7 @@ def _sum(rows: list[PeriodStats]) -> PeriodStats | None:
         avg_time_ms=round(sum(a * n for a, n in times) / sum(n for _, n in times), 2) if times else None,
         max_time_ms=max((r.max_time_ms for r in rows if r.max_time_ms is not None), default=None),
         expected=None, missing=miss, active_hours=max(r.active_hours for r in rows),
+        unknown_hours=sum(r.unknown_hours for r in rows),
     )
 
 
@@ -278,13 +280,16 @@ def render(snap: Snapshot, st: Style, width: int = 80, interval: float | None = 
             rows.append(_sum(rows))
         for r in rows:
             name = r.sensor_id or "-"
-            miss = _n(r.missing)
+            miss = miss_text(r.missing, r.unknown_hours)
             ng = f"{r.fail_count:,}"
             line = (f"  {name:<10}{r.total:>11,}{(st.red(f'{ng:>9}') if r.fail_count else f'{ng:>9}')}"
                     f"{_pct(r.ng_pct):>9}{_pct(r.yield_pct):>9}"
                     f"{(st.yellow(f'{miss:>9}') if r.missing else f'{miss:>9}')}"
                     f"{('-' if r.avg_time_ms is None else f'{r.avg_time_ms:.1f}'):>8}{r.active_hours:>7}")
             add(st.bold(line) if name == "ALL" else line)
+        if any(r.unknown_hours or r.missing is None for r in rows):
+            add(st.dim("  Missing: '*' = plus hours where the sensor counter restarted (not measurable); "
+                       "'-' = no measurable hour yet"))
         for r in snap.this_hour:
             if r.missing:
                 alerts.append(f"{r.sensor_id}: {r.missing:,} inspections missing this hour (sensor counted, file "
