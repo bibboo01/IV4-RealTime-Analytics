@@ -216,3 +216,27 @@ def test_batch_actions_mixed(repo):
     assert res[3][0] == res[2][0]
     assert repo.count() == 3
     assert summarize(repo, by="day")[0].total == 3
+
+
+def test_retention_waits_for_pending_upload(tmp_path):
+    from datetime import date
+    from app.maintenance import purge_archive
+    for day in ("2026-10-01", "2026-10-03"):
+        (tmp_path / day / "OK" / "10").mkdir(parents=True)
+        (tmp_path / day / "OK" / "10" / "a.jpg").write_text("x")
+    today = date(2026, 10, 10)
+    # 10-01 is 9 days old, 10-03 is 7 days old; keep 2 days; only 10-01 still has pending uploads
+    removed = purge_archive(tmp_path, 2, 2, today=today, hold=lambda d, s: d == "2026-10-01")
+    assert removed == ["2026-10-03/OK"] and (tmp_path / "2026-10-01").exists()
+    # held folders are not kept forever: past keep + 14 days they go anyway
+    removed = purge_archive(tmp_path, 2, 2, today=date(2026, 10, 20), hold=lambda d, s: True)
+    assert removed == ["2026-10-01/OK"]
+
+
+def test_count_pending_by_folder_prefix(repo):
+    save(repo, rec(1))
+    repo.set_folder("u1", "2026-10-03/OK/18/u1")
+    assert repo.count_pending_uploads(None, "2026-10-03/OK/") == 1
+    assert repo.count_pending_uploads(None, "2026-10-03/NG/") == 0
+    repo.mark_uploaded("u1", "ref")
+    assert repo.count_pending_uploads(None, "2026-10-03/OK/") == 0

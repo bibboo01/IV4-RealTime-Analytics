@@ -106,6 +106,7 @@ class UploadWorker(threading.Thread):
         from app.upload.google_drive import DriveConfigError
 
         while not self.stop_event.is_set():
+            n = 0
             try:
                 if self._uploader is None:
                     self._uploader = make_uploader(self.settings)
@@ -127,4 +128,6 @@ class UploadWorker(threading.Thread):
                 self.stats["pending"] = self.repo.count_pending_uploads(self.settings.upload_statuses)
             except Exception:  # noqa: BLE001
                 pass
+            if n >= self.settings.upload_batch:
+                continue                     # full batch: more is waiting, do not sleep
             self.stop_event.wait(self.settings.upload_interval)

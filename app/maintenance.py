@@ -12,6 +12,10 @@ Housekeeping that runs in its own thread (never blocks ingestion):
   the disk guard - only by IV4_RETENTION_NG_DAYS. This makes storage
   self-managing when production hours vary from day to day.
 
+* When upload is on, retention waits for images that are still queued for Google Drive
+  (at most HOLD_EXTRA_DAYS past the retention age), so nothing is deleted before it is uploaded.
+  The disk guard does NOT wait: a full disk would stop ingestion.
+
 Only folders whose name is a date under archive/ are ever deleted.
 """
 from __future__ import annotations
@@ -30,6 +34,7 @@ log = logging.getLogger("iv4.maintenance")
 
 _DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 NG_FOLDERS = ("NG", "UNKNOWN")
+HOLD_EXTRA_DAYS = 14        # retention waits this long at most for a folder that is not uploaded yet
 
 
 def disk_free_gb(path: Path) -> float | None:
@@ -39,8 +44,12 @@ def disk_free_gb(path: Path) -> float | None:
         return None
 
 
-def purge_archive(archive_dir: Path, ok_days: int, ng_days: int, today: date | None = None) -> list[str]:
-    """Delete expired day/status folders. Returns the relative paths removed."""
+def purge_archive(archive_dir: Path, ok_days: int, ng_days: int, today: date | None = None,
+                  hold=None) -> list[str]:
+    """
+    Delete expired day/status folders. Returns the relative paths removed.
+    hold(day, status) -> True keeps a folder that still waits for upload (for up to HOLD_EXTRA_DAYS).
+    """
     today = today or date.today()
     removed: list[str] = []
     if not archive_dir.exists():
@@ -55,6 +64,8 @@ def purge_archive(archive_dir: Path, ok_days: int, ng_days: int, today: date | N
         for sub in sorted(p for p in day_dir.iterdir() if p.is_dir()):
             keep = ok_days if sub.name == "OK" else ng_days if sub.name in NG_FOLDERS else 0
             if keep > 0 and age >= keep:
+                if hold and age < keep + HOLD_EXTRA_DAYS and hold(day_dir.name, sub.name):
+                    continue
                 shutil.rmtree(sub, ignore_errors=True)
                 removed.append(f"{day_dir.name}/{sub.name}")
         if not any(day_dir.iterdir()):
@@ -124,7 +135,10 @@ class MaintenanceWorker(threading.Thread):
 
     def run_once(self, repo: DatabaseRepository) -> None:
         s = self.settings
-        removed = purge_archive(s.archive_dir, s.retention_ok_days, s.retention_ng_days)
+        hold = None
+        if s.upload_enabled:
+            hold = lambda day, sub: repo.count_pending_uploads(s.upload_statuses, f"{day}/{sub}/") > 0  # noqa: E731
+        removed = purge_archive(s.archive_dir, s.retention_ok_days, s.retention_ng_days, hold=hold)
         for r in removed:
             log.info("[RETENTION] deleted images %s", r)
         self.stats["removed_folders"] += len(removed)

@@ -551,10 +551,12 @@ class DatabaseRepository:
         with Session(self.engine) as session:
             return [tuple(r) for r in session.execute(q.order_by(Inspection.id).limit(limit))]
 
-    def count_pending_uploads(self, statuses: frozenset[str] | None) -> int:
+    def count_pending_uploads(self, statuses: frozenset[str] | None, folder_prefix: str | None = None) -> int:
         q = select(func.count()).select_from(Inspection).where(
             Inspection.uploaded_at.is_(None), Inspection.folder.is_not(None)
         )
+        if folder_prefix:
+            q = q.where(Inspection.folder.startswith(folder_prefix))
         if statuses is not None:
             q = q.where(Inspection.analysis_status.in_(sorted(statuses)))
         with Session(self.engine) as session:
