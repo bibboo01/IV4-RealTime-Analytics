@@ -43,7 +43,7 @@ run
 | `IV4_SENSORS` | ชื่อ sensor คั่นด้วยจุลภาค เช่น `IV4-01,IV4-02` (1 sensor = 1 โฟลเดอร์ย่อยใน `incoming`) |
 | `IV4_DATE_FORMAT` | `%d/%m/%Y` (วัน/เดือน/ปี) หรือ `%m/%d/%Y` ให้ตรงกับที่ sensor เขียนใน TXT |
 | `IV4_INCOMING_DIR` / `IV4_ARCHIVE_DIR` | ปกติไม่ต้องแก้ ถ้ามีดิสก์ใหญ่ให้ชี้ `IV4_ARCHIVE_DIR` ไปที่นั่น (ควรอยู่ไดรฟ์เดียวกับ `incoming`) |
-| `IV4_RETENTION_OK_DAYS` / `IV4_RETENTION_NG_DAYS` | จำนวนวันที่เก็บรูป (0 = ไม่ลบเอง ระบบลบรูป OK เก่าสุดเองเมื่อดิสก์เหลือต่ำกว่า `IV4_MIN_FREE_GB`) |
+| `IV4_RETENTION_OK_DAYS` / `IV4_RETENTION_NG_DAYS` | จำนวนวันที่เก็บรูป (0 = ไม่ลบเอง ระบบลบรูป OK เก่าสุดเองเมื่อดิสก์เหลือต่ำกว่า `IV4_MIN_FREE_GB`) ถ้าเปิด upload ไว้ ระบบจะรอให้โฟลเดอร์นั้นอัปโหลดเสร็จก่อนค่อยลบ (รอสูงสุดอีก 14 วัน) เช่น `OK=2`, `NG=30` |
 | `IV4_USE_POLLING` | `true` ถ้า `incoming` เป็น network share |
 | `IV4_UPLOAD_ENABLED` | `true` เมื่อต้องการอัปโหลดขึ้น Google Drive (ค่าเริ่มต้นปิด) |
 | `IV4_SHEETS_ENABLED` | `true` เมื่อต้องการ Google Sheets Dashboard (ค่าเริ่มต้นปิด) |
@@ -92,7 +92,8 @@ run production --passive 50000-50100      # ทำจริง (ใส่ช่�
 | --- | --- |
 | ดูสถานะสดใน terminal | `run monitor` |
 | สรุปสั้น ๆ (ทำงานอยู่ไหม, ยอดวันนี้) | `run status` |
-| หยุดรัน | `run stop` |
+| หยุดรัน | `run clear` | **ล้างข้อมูลเริ่มใหม่** ลบฐานข้อมูล + รูปที่เก็บไว้ (ต้อง `run stop` ก่อน และต้องพิมพ์ `CLEAR` ยืนยัน) ไม่แตะ `.env`, การล็อกอิน Google, backup และไฟล์ที่อยู่บน Drive แล้ว ตัวเลือก: `--dry-run` (ดูก่อนไม่ลบ) `--db-only` `--images-only` `--incoming` `--logs` `--yes` |
+| `run stop` |
 | รายงาน/ส่งออก Excel | `run metrics --by day --per-sensor --csv report.csv` |
 | Dashboard บน Google Sheets | `run sheets` (หรือเปิดลิงก์ที่ได้) |
 | ตรวจว่าทำไมไม่อัปโหลด | `run upload` |
