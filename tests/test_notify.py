@@ -145,8 +145,21 @@ def test_notify_cli_status_and_preflight(tmp_path, capsys):
     s = load_settings(base_dir=tmp_path, overrides={"IV4_TELEGRAM_ENABLED": "true"})
     assert cli.COMMANDS["notify"]([], s) == 0
     out = capsys.readouterr().out
-    assert "Shifts" in out and "A  07:00-15:00" in out and "token MISSING" in out
+    assert "Shifts" in out and "A  08:00-16:00" in out and "token MISSING" in out
     res = cli.preflight(s)
     assert any(lvl == cli.ERR and "TELEGRAM_TOKEN" in msg for lvl, msg in res)
     bad = load_settings(base_dir=tmp_path, overrides={"IV4_TELEGRAM_ENABLED": "true", "IV4_SHIFTS": "A,xx"})
     assert cli.COMMANDS["notify"]([], bad) == 2
+
+
+def test_shipped_default_shifts_start_at_eight(tmp_path):
+    s = load_settings(base_dir=tmp_path)
+    shifts = notify.parse_shifts(s.shifts)
+    assert [(x.name, x.start.hour, x.end.hour) for x in shifts] == [("A", 8, 16), ("B", 16, 0), ("C", 0, 8)]
+    assert notify.current(dt("2026-10-06 08:00"), shifts)[0].name == "A"
+    assert notify.current(dt("2026-10-06 23:59"), shifts)[0].name == "B"
+    s_, start, end = notify.current(dt("2026-10-06 16:30"), shifts)
+    assert (s_.name, end) == ("B", dt("2026-10-07 00:00"))            # shift B ends at midnight
+    assert notify.current(dt("2026-10-07 00:00"), shifts)[0].name == "C"
+    assert notify.in_break(dt("2026-10-06 12:30"), shifts) and notify.in_break(dt("2026-10-06 20:30"), shifts)
+    assert notify.in_break(dt("2026-10-07 04:30"), shifts) and not notify.in_break(dt("2026-10-07 05:00"), shifts)

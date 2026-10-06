@@ -112,7 +112,7 @@ class Settings:
     telegram_enabled: bool = False
     telegram_token: str = ""
     telegram_chat_id: str = ""
-    shifts: str = "A,07:00,15:00,11:00,12:00;B,15:00,23:00,19:00,20:00;C,23:00,07:00,03:00,04:00"
+    shifts: str = "A,08:00,16:00,12:00,13:00;B,16:00,00:00,20:00,21:00;C,00:00,08:00,04:00,05:00"
     notify_no_data_min: int = 10        # alert when nothing arrived for this many minutes while working
     notify_backlog: int = 200           # alert when this many files wait in incoming
 
@@ -251,7 +251,7 @@ def load_settings(
         telegram_enabled=get("TELEGRAM_ENABLED", "false").lower() in {"1", "true", "yes"},
         telegram_token=get("TELEGRAM_TOKEN", "").strip(),
         telegram_chat_id=get("TELEGRAM_CHAT_ID", "").strip(),
-        shifts=get("SHIFTS", "A,07:00,15:00,11:00,12:00;B,15:00,23:00,19:00,20:00;C,23:00,07:00,03:00,04:00").strip(),
+        shifts=get("SHIFTS", "A,08:00,16:00,12:00,13:00;B,16:00,00:00,20:00,21:00;C,00:00,08:00,04:00,05:00").strip(),
         notify_no_data_min=max(_i("NOTIFY_NO_DATA_MIN", "10"), 1),
         notify_backlog=max(_i("NOTIFY_BACKLOG", "200"), 1),
         log_level=get("LOG_LEVEL", "INFO").upper(),

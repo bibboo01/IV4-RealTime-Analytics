@@ -4,7 +4,7 @@ Telegram notifications by work shift.
 Shifts come from IV4_SHIFTS: ``name,start,end[,break_start,break_end]`` separated by ``;``
 (24-hour PC clock, a shift may cross midnight)::
 
-    A,07:00,15:00,11:00,12:00;B,15:00,23:00,19:00,20:00;C,23:00,07:00,03:00,04:00
+    A,08:00,16:00,12:00,13:00;B,16:00,00:00,20:00,21:00;C,00:00,08:00,04:00,05:00
 
 Messages (Thai):
   * shift start   - agent state
