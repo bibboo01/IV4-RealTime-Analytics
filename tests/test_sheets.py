@@ -165,7 +165,7 @@ def test_first_publish_creates_sheet_tabs_charts_and_values(seeded, gsettings):
     charts = [r for _, reqs in api.batch_updates for r in reqs if "addChart" in r]
     assert len(charts) == 3
     ranges = api.written[sid]
-    assert "'Hourly'!A1:F49" in ranges and "'Today'!A1:I10" in ranges and "'Status'!A1:B14" in ranges
+    assert "'Hourly'!A1:F49" in ranges and "'Today'!A1:I10" in ranges and "'Status'!A1:B18" in ranges
     assert json.loads(gsettings.gdrive_token.parent.joinpath("sheets_state.json").read_text()) == {
         "spreadsheet_id": sid, "charts": True}
 
@@ -295,3 +295,15 @@ def test_run_sheets_command_without_signin_explains(gsettings, capsys):
     assert cli.cmd_sheets([], gsettings) == 1
     out = capsys.readouterr().out
     assert "Cannot publish" in out and "run gdrive-auth" in out
+
+
+def test_status_tab_shows_upload_and_retention(gsettings):
+    from dataclasses import replace
+    from app import sheets
+    s = replace(gsettings, upload_enabled=True, upload_statuses=None, retention_ok_days=2, retention_ng_days=30)
+    health = {"upload": {"enabled": True, "uploaded": 1234, "pending": 56, "last_upload_error": None}}
+    assert sheets._upload_line(s, health) == "ON - ALL images"
+    assert sheets._upload_counts(health) == "1,234 sent / 56 waiting"
+    assert sheets._retention_line(s) == "OK 2 days, NG 30 days"
+    assert sheets._upload_line(replace(s, upload_enabled=False), {}).startswith("OFF")
+    assert sheets._retention_line(replace(s, retention_ok_days=0)).startswith("OK forever")

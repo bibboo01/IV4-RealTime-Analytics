@@ -45,7 +45,7 @@ DAYS = 30
 LATEST_NG = 20
 TODAY_ROWS = 10
 TOOL_ROWS = 31
-STATUS_ROWS = 14
+STATUS_ROWS = 18
 
 SHEET_MIME = "application/vnd.google-apps.spreadsheet"
 TABS = ["Today", "Hourly", "Daily", "Tools", "Latest NG", "Status"]
@@ -62,6 +62,27 @@ def _v(x):
 def _pad(rows: list[list], n: int, width: int) -> list[list]:
     rows = [r + [""] * (width - len(r)) for r in rows[:n]]
     return rows + [[""] * width for _ in range(n - len(rows))]
+
+
+def _upload_line(s: Settings, health: dict) -> str:
+    if not s.upload_enabled:
+        return "OFF (IV4_UPLOAD_ENABLED=false)"
+    what = "ALL images" if s.upload_statuses is None else "only " + "+".join(sorted(s.upload_statuses))
+    err = (health.get("upload") or {}).get("last_upload_error")
+    return f"ON - {what}" + (f" - ERROR: {err[:120]}" if err else "")
+
+
+def _upload_counts(health: dict) -> str:
+    up = health.get("upload") or {}
+    if not up.get("enabled"):
+        return "-"
+    return f"{up.get('uploaded', 0):,} sent / {up.get('pending', 0):,} waiting"
+
+
+def _retention_line(s: Settings) -> str:
+    def d(n: int) -> str:
+        return f"{n} days" if n > 0 else "forever"
+    return f"OK {d(s.retention_ok_days)}, NG {d(s.retention_ng_days)}"
 
 
 def build_tables(repo: DatabaseRepository, s: Settings, now: datetime | None = None,
@@ -132,6 +153,11 @@ def build_tables(repo: DatabaseRepository, s: Settings, now: datetime | None = N
                 ["Errors since start", health.get("errors", "-")],
                 ["Last error", (health.get("last_error") or "-")[:200]],
                 ["Disk free (GB)", health.get("disk_free_gb", "-")],
+                ["Google Drive upload", _upload_line(s, health)],
+                ["Uploaded / waiting", _upload_counts(health)],
+                ["Keep images on this PC", _retention_line(s)],
+                ["Disk guard", f"deletes oldest OK images when free space < {s.min_free_gb:g} GB"
+                               if s.disk_prune_ok else f"warning only below {s.min_free_gb:g} GB"],
                 ["Rule", "Missing must be 0: sensor counted, file never arrived (check FTP)"]]
 
     return {
