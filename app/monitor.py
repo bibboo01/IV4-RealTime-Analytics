@@ -4,6 +4,7 @@ Live terminal monitor: one screen with everything the line needs at a glance.
     run monitor                 refresh every 2 s (Ctrl+C to quit)
     run monitor --interval 5    slower refresh
     run monitor --hours 12      longer hourly chart
+    run monitor --live-hours 6  more rows in the per-minute live chart (default 3, 0 = hide)
     run monitor --once          print one snapshot and exit (no screen clearing)
 
 Read-only: works while the agent (or the Windows service) is running, from a
@@ -28,6 +29,9 @@ from app.config import Settings
 from app.metrics import PeriodStats, miss_text, summarize, tool_summary
 
 BAR = "█"
+SPARK = "▁▂▃▄▅▆▇█"
+LIVE_CACHE_S = 5          # the per-minute query is re-run at most this often
+_live_cache: dict = {}
 HEARTBEAT_STALE_S = 60
 BACKLOG_WARN = 200          # files waiting in incoming/ (~5 s of 2 sensors)
 
@@ -78,6 +82,8 @@ class Snapshot:
     clock_offset_s: float | None = None     # sensor clock minus this PC's clock, from the newest inspection
     db_error: str | None = None
     chart_hours: int = 8
+    live_hours: int = 3
+    live: dict = field(default_factory=dict)    # 'YYYY-MM-DD HH' -> {minute: (total, ng)}
 
 
 def _read_health(s: Settings) -> dict | None:
@@ -102,9 +108,31 @@ def _clock_offset(row, now: datetime) -> float | None:
     return (sensor - (now - timedelta(seconds=age))).total_seconds()
 
 
-def collect(repo, s: Settings, hours: int, pid: str | None, now: datetime | None = None) -> Snapshot:
+def live_minutes(repo, now: datetime, hours: int) -> dict:
+    """Per-minute (total, NG) for the last `hours` hours (sensor clock), cached for a few seconds."""
+    key = (id(repo), now.strftime("%Y-%m-%d %H"), hours)
+    hit = _live_cache.get(key)
+    if hit and time.monotonic() - hit[0] < LIVE_CACHE_S:
+        return hit[1]
+    first = (now - timedelta(hours=hours - 1)).strftime("%Y-%m-%d %H")
+    out: dict = {}
+    with repo.engine.connect() as c:
+        for hour, minute, n, ng in c.execute(text(
+                "SELECT substr(timestamp, 1, 13), CAST(substr(timestamp, 15, 2) AS INTEGER), COUNT(*), "
+                "SUM(CASE WHEN analysis_status = 'FAIL' THEN 1 ELSE 0 END) FROM inspection "
+                "WHERE timestamp >= :a AND timestamp < :b GROUP BY 1, 2"),
+                {"a": first, "b": (now + timedelta(days=1)).strftime("%Y-%m-%d")}):
+            if hour and minute is not None:
+                out.setdefault(hour, {})[minute] = (n, ng or 0)
+    _live_cache.clear()
+    _live_cache[key] = (time.monotonic(), out)
+    return out
+
+
+def collect(repo, s: Settings, hours: int, pid: str | None, now: datetime | None = None,
+            live_hours: int = 3) -> Snapshot:
     now = now or datetime.now()
-    snap = Snapshot(now=now, pid=pid, health=_read_health(s), chart_hours=hours)
+    snap = Snapshot(now=now, pid=pid, health=_read_health(s), chart_hours=hours, live_hours=live_hours)
     today = now.strftime("%Y-%m-%d")
     tomorrow = (now + timedelta(days=1)).strftime("%Y-%m-%d")
     cur_hour = now.strftime("%Y-%m-%d %H")
@@ -114,6 +142,8 @@ def collect(repo, s: Settings, hours: int, pid: str | None, now: datetime | None
         snap.this_hour = summarize(repo, cur_hour, tomorrow, by="hour", per_sensor=True)
         snap.hours = summarize(repo, first_hour, tomorrow, by="hour")
         snap.tools = tool_summary(repo, today, tomorrow, per_sensor=True)
+        if live_hours > 0:
+            snap.live = live_minutes(repo, now, live_hours)
         since = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=60)
         with repo.engine.connect() as c:
             snap.last_minute = {k or "-": n for k, n in c.execute(text(
@@ -310,6 +340,32 @@ def render(snap: Snapshot, st: Style, width: int = 80, interval: float | None = 
             ng = f"NG {r.fail_count:>6,} {_pct(r.ng_pct):>7}" if r else st.dim("-")
             add(f"  {slot[11:13]}:00 {bar} {tot:>9,}  {ng}")
 
+    # --- live per-minute chart --------------------------------------------
+    if snap.live_hours > 0 and not snap.db_error:
+        add("")
+        add(st.bold(" LIVE") + st.dim("  one cell = one minute (sensor clock), height = inspections, red = has NG"))
+        peak = max((n for mins in snap.live.values() for n, _ in mins.values()), default=0)
+        for i in range(snap.live_hours - 1, -1, -1):
+            hr = snap.now - timedelta(hours=i)
+            key = hr.strftime("%Y-%m-%d %H")
+            mins = snap.live.get(key, {})
+            current = i == 0
+            cells = []
+            for m in range(60):
+                if current and m > snap.now.minute:
+                    cells.append(" ")
+                    continue
+                n, ng = mins.get(m, (0, 0))
+                if n == 0:
+                    cells.append(st.dim("·"))
+                    continue
+                ch = SPARK[min(len(SPARK) - 1, (n * len(SPARK) - 1) // peak)] if peak else SPARK[0]
+                cells.append(st.red(ch) if ng else st.cyan(ch))
+            tot = sum(n for n, _ in mins.values())
+            tng = sum(g for _, g in mins.values())
+            add(f"  {hr:%H}:00 {''.join(cells)} {tot:>8,}  NG {tng:>6,}")
+        add(st.dim(f"        00{' ' * 13}15{' ' * 13}30{' ' * 13}45{' ' * 13}min  (tallest cell = {peak:,}/min)"))
+
     # --- tools ---------------------------------------------------------
     if snap.tools:
         add("")
@@ -357,11 +413,13 @@ def run(args: list[str], s: Settings, running_pid) -> int:
     ap = argparse.ArgumentParser(prog="run monitor", description="Live terminal monitor (Ctrl+C to quit).")
     ap.add_argument("--interval", type=float, default=2.0, help="seconds between refreshes (default 2)")
     ap.add_argument("--hours", type=int, default=8, help="hours in the hourly chart (default 8)")
+    ap.add_argument("--live-hours", type=int, default=3, help="rows in the per-minute live chart (default 3, 0 = hide)")
     ap.add_argument("--once", action="store_true", help="print one snapshot and exit")
     ap.add_argument("--no-color", action="store_true")
     a = ap.parse_args(args)
     a.interval = max(a.interval, 0.5)
     a.hours = min(max(a.hours, 1), 48)
+    a.live_hours = min(max(a.live_hours, 0), 12)
 
     from app.database.repository import DatabaseRepository
 
@@ -370,7 +428,7 @@ def run(args: list[str], s: Settings, running_pid) -> int:
     st = Style(_enable_ansi() and not a.no_color)
 
     def frame() -> list[str]:
-        snap = collect(repo, s, a.hours, running_pid())
+        snap = collect(repo, s, a.hours, running_pid(), live_hours=a.live_hours)
         width = shutil.get_terminal_size((100, 40)).columns
         return render(snap, st, width, a.interval if live else None)
 
