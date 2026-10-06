@@ -108,13 +108,34 @@ def test_no_data_alert_only_while_working_with_cooldown(worker, repo):
     assert worker.sent == []
 
 
-def test_missing_alert_and_backlog_alert(worker, repo):
+def test_alerts_are_one_combined_message_and_missing_needs_a_threshold(worker, repo):
     for i in [0, 1, 2, 5]:                                            # triggers 100..105, 4 received -> 2 missing
         save(repo, rec(100 + i, ts="2026-10-06 09:10:00"))
     (worker.s.log_dir / "health.json").write_text(json.dumps({"incoming_files": 900, "disk_free_gb": 5, "min_free_gb": 20}))
     worker.run_alerts(repo, dt("2026-10-06 09:30"))
-    text_ = "\n".join(worker.sent)
-    assert "ไฟล์หาย 2 ชุด" in text_ and "ไฟล์ค้างรอประมวลผล 900" in text_ and "พื้นที่ดิสก์เหลือ 5" in text_
+    assert len(worker.sent) == 1                                      # several problems, ONE message
+    msg = worker.sent[0]
+    assert "ไฟล์ค้างรอประมวลผล 900" in msg and "พื้นที่ดิสก์เหลือ 5" in msg and msg.count("•") == 2
+    assert "ไฟล์หาย" not in msg                                       # only 2 missing: below IV4_NOTIFY_MISSING_MIN=10
+
+
+def test_missing_alert_when_enough_files_are_lost_and_only_new_ones_repeat(worker, repo):
+    for i in range(0, 40, 4):                                         # 10 received of triggers 100..136 -> 27 missing
+        save(repo, rec(100 + i, ts="2026-10-06 09:10:00"))
+    worker.run_alerts(repo, dt("2026-10-06 09:30"))
+    assert len(worker.sent) == 1 and "ไฟล์หาย 27 ชุด" in worker.sent[0]
+    worker.cool.clear()                                               # even without the cool-down: nothing new lost
+    worker.run_alerts(repo, dt("2026-10-06 09:45"))
+    assert len(worker.sent) == 1
+
+
+def test_same_alert_waits_for_the_cooldown(worker, repo):
+    (worker.s.log_dir / "health.json").write_text(json.dumps({"incoming_files": 900}))
+    worker.run_alerts(repo, dt("2026-10-06 09:30"))
+    worker.run_alerts(repo, dt("2026-10-06 10:00"))                    # 30 min later: still inside the 60 min cool-down
+    assert len(worker.sent) == 1
+    worker.run_alerts(repo, dt("2026-10-06 10:31"))                    # past the cool-down: remind once
+    assert len(worker.sent) == 2
 
 
 def test_send_telegram_ok_and_errors(monkeypatch):

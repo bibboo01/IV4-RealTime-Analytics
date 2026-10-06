@@ -11,7 +11,8 @@ Messages (Thai):
   * break start   - progress of the shift so far
   * shift end     - shift summary: total, NG, NG %, Yield, Missing per sensor, worst tools
   * alerts while WORKING (never during the break): nothing arriving, files missing, backlog,
-    disk low, upload/Sheets errors - each with a cool-down so the chat is not flooded.
+    disk low, upload/Sheets errors. Calm by design: everything found in one check goes out as ONE
+    message, and the same alert is repeated at most every IV4_NOTIFY_COOLDOWN_MIN (default 60 min).
 
 Sent events are remembered in logs/notify_state.json, so a restart does not repeat them.
 The agent must be running to send (the worker lives inside it).
@@ -36,7 +37,6 @@ log = logging.getLogger("iv4.notify")
 
 MAX_AGE = timedelta(minutes=15)       # an event older than this is skipped (e.g. PC was off)
 LOOP_SECONDS = 30
-COOLDOWN = {"nodata": 30, "missing": 15, "backlog": 30, "disk": 60, "upload": 60, "sheets": 60}   # minutes
 
 
 # ------------------------------------------------------------------
@@ -264,7 +264,9 @@ class NotifyWorker(threading.Thread):
         self.state_path = settings.log_dir / "notify_state.json"
         self.sent_keys: dict[str, str] = self._load()
         self.cool: dict[str, datetime] = {}
-        self.last_missing = 0
+        self.missing_hour = ""
+        self.missing_alerted = 0
+        self._miss_now = 0
         self.stats = {"sent": 0, "last_sent_at": None, "last_error": None}
 
     # state ---------------------------------------------------------
@@ -323,20 +325,13 @@ class NotifyWorker(threading.Thread):
             return {}
 
     # alerts --------------------------------------------------------
-    def _alert(self, key: str, message: str, now: datetime) -> None:
-        last = self.cool.get(key)
-        if last and now - last < timedelta(minutes=COOLDOWN.get(key, 30)):
-            return
-        if self._post("⚠️ " + message):
-            self.cool[key] = now
-
-    def run_alerts(self, repo, now: datetime) -> None:
-        cur = current(now, self.shifts)
-        if not cur or in_break(now, self.shifts):
-            return
-        shift, start, _ = cur
+    def find_alerts(self, repo, now: datetime) -> list[tuple[str, str]]:
+        """[(key, message)] for everything wrong right now (before the cool-down is applied)."""
         s = self.s
         h = self._health()
+        found: list[tuple[str, str]] = []
+        cur = current(now, self.shifts)
+        shift, start, _ = cur
         if now - start >= timedelta(minutes=s.notify_no_data_min):
             with repo.engine.connect() as c:
                 last = c.execute(text("SELECT MAX(created_at) FROM inspection")).scalar()
@@ -347,26 +342,46 @@ class NotifyWorker(threading.Thread):
                 except ValueError:
                     idle = 0
                 if idle >= s.notify_no_data_min:
-                    self._alert("nodata", f"กะ {shift.name}: ไม่มีไฟล์เข้ามา {idle:.0f} นาทีแล้ว "
-                                f"(เช็ก sensor / FTP / สายแลน)", now)
-        miss = sum(r.missing or 0 for r in summarize(repo, _hour(now), _hour(now + timedelta(hours=1)),
+                    found.append(("nodata", f"ไม่มีไฟล์เข้ามา {idle:.0f} นาทีแล้ว (เช็ก sensor / FTP / สายแลน)"))
+        hour = _hour(now)
+        miss = sum(r.missing or 0 for r in summarize(repo, hour, _hour(now + timedelta(hours=1)),
                                                       by="hour", per_sensor=True))
-        if miss > self.last_missing:
-            self._alert("missing", f"ชั่วโมงนี้ไฟล์หาย {miss:,} ชุด (sensor นับแล้วแต่ไฟล์ไม่มา) "
-                        "เช็ก FTP / trigger interval", now)
-        self.last_missing = miss
+        if self.missing_hour != hour:
+            self.missing_hour, self.missing_alerted = hour, 0
+        if miss - self.missing_alerted >= s.notify_missing_min:
+            found.append(("missing", f"ชั่วโมงนี้ไฟล์หาย {miss:,} ชุด (sensor นับแล้วแต่ไฟล์ไม่มา) "
+                                     "เช็ก FTP / trigger interval"))
+            self._miss_now = miss
         waiting = h.get("incoming_files", 0)
         if waiting > s.notify_backlog:
-            self._alert("backlog", f"มีไฟล์ค้างรอประมวลผล {waiting:,} ไฟล์ agent ตามไม่ทัน", now)
+            found.append(("backlog", f"มีไฟล์ค้างรอประมวลผล {waiting:,} ไฟล์ agent ตามไม่ทัน"))
         disk, low = h.get("disk_free_gb"), h.get("min_free_gb", 0)
         if disk is not None and disk < low:
-            self._alert("disk", f"พื้นที่ดิสก์เหลือ {disk:,.0f} GB (ต่ำกว่า {low:g} GB) กำลังลบรูป OK เก่า", now)
+            found.append(("disk", f"พื้นที่ดิสก์เหลือ {disk:,.0f} GB (ต่ำกว่า {low:g} GB) กำลังลบรูป OK เก่า"))
         up = h.get("upload") or {}
         if up.get("enabled") and up.get("last_upload_error"):
-            self._alert("upload", f"อัปโหลด Google Drive ผิดพลาด: {up['last_upload_error'][:150]} (run upload)", now)
+            found.append(("upload", f"อัปโหลด Google Drive ผิดพลาด: {up['last_upload_error'][:150]} (run upload)"))
         sh = h.get("sheets") or {}
         if sh.get("enabled") and sh.get("last_error"):
-            self._alert("sheets", f"อัปเดต Google Sheets ผิดพลาด: {sh['last_error'][:150]}", now)
+            found.append(("sheets", f"อัปเดต Google Sheets ผิดพลาด: {sh['last_error'][:150]}"))
+        return found
+
+    def run_alerts(self, repo, now: datetime) -> None:
+        """One message for everything new; the same alert is repeated at most every cool-down."""
+        cur = current(now, self.shifts)
+        if not cur or in_break(now, self.shifts):
+            return
+        wait = timedelta(minutes=self.s.notify_cooldown_min)
+        due = [(k, m) for k, m in self.find_alerts(repo, now)
+               if not (self.cool.get(k) and now - self.cool[k] < wait)]
+        if not due:
+            return
+        body = "\n".join(f"• {m}" for _, m in due)
+        if self._post(f"⚠️ แจ้งเตือน กะ {cur[0].name} ({now:%H:%M})\n{body}"):
+            for k, _ in due:
+                self.cool[k] = now
+            if any(k == "missing" for k, _ in due):
+                self.missing_alerted = self._miss_now
 
     # loop ----------------------------------------------------------
     def tick(self, repo, now: datetime | None = None) -> None:
