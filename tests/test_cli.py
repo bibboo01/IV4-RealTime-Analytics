@@ -264,7 +264,8 @@ def test_monitor_live_per_minute_chart(settings, capsys):
     live = out.split(" LIVE", 1)[1].split("TOOLS TODAY", 1)[0]
     rows = [ln for ln in live.splitlines() if ln.strip().startswith(f"{now:%H}:00")]
     assert rows and "NG      1" in rows[0] and "█" in rows[0]           # current hour, one minute cell
-    assert len([ln for ln in live.splitlines() if ln.strip()[:3].isdigit() and ":00" in ln[:8]]) == 2
+    import re
+    assert len([ln for ln in live.splitlines() if re.match(r"\s+\d\d:00 ", ln)]) == 2      # --live-hours 2
     assert "LIVE" not in _render_without_live(settings)
 
 
