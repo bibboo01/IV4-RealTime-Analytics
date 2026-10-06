@@ -237,3 +237,20 @@ def test_stop_asks_running_agent_to_exit(tmp_path, capsys):
     assert cli.COMMANDS["stop"]([], s) == 0
     t.join(5)
     assert "Stopped." in capsys.readouterr().out
+
+
+def test_monitor_clock_offset_detects_sensor_clock_difference():
+    from datetime import datetime, timedelta
+    from app.monitor import _clock_offset
+    now = datetime(2026, 10, 6, 11, 14, 0)
+    received = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=10)
+    # sensor says 04:14 while this PC says 11:14 -> sensor is 7 h behind
+    off = _clock_offset(("2026-10-06 04:14:00", received.isoformat(sep=" ")), now)
+    assert round(off / 3600, 1) == -7.0
+    # same clock -> ~0
+    off = _clock_offset(("2026-10-06 11:13:50", received.isoformat(sep=" ")), now)
+    assert abs(off) < 2
+    # old data is not live -> no verdict
+    old = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=3)
+    assert _clock_offset(("2026-10-06 04:14:00", old.isoformat(sep=" ")), now) is None
+    assert _clock_offset(None, now) is None

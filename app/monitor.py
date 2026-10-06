@@ -75,6 +75,7 @@ class Snapshot:
     latest_ng: list[tuple] = field(default_factory=list)
     latest_hour: str | None = None
     last_minute: dict[str, int] = field(default_factory=dict)   # sensor -> inspections
+    clock_offset_s: float | None = None     # sensor clock minus this PC's clock, from the newest inspection
     db_error: str | None = None
     chart_hours: int = 8
 
@@ -84,6 +85,21 @@ def _read_health(s: Settings) -> dict | None:
         return json.loads((s.log_dir / "health.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
+
+
+def _clock_offset(row, now: datetime) -> float | None:
+    """Sensor clock minus this PC's clock (seconds), using when the newest inspection was received."""
+    if not row or not row[0] or not row[1]:
+        return None
+    try:
+        sensor = datetime.fromisoformat(str(row[0])[:19].replace("/", "-"))
+        received = row[1] if isinstance(row[1], datetime) else datetime.fromisoformat(str(row[1])[:26])
+    except ValueError:
+        return None
+    age = (datetime.now(timezone.utc).replace(tzinfo=None) - received).total_seconds()
+    if age > 600:                      # not live data - the comparison would be meaningless
+        return None
+    return (sensor - (now - timedelta(seconds=age))).total_seconds()
 
 
 def collect(repo, s: Settings, hours: int, pid: str | None, now: datetime | None = None) -> Snapshot:
@@ -106,6 +122,8 @@ def collect(repo, s: Settings, hours: int, pid: str | None, now: datetime | None
             snap.latest_ng = list(c.execute(text(
                 "SELECT timestamp, camera_id, inspection_id, analysis_reason FROM inspection "
                 "WHERE analysis_status = 'FAIL' ORDER BY id DESC LIMIT 5")))
+            newest = c.execute(text("SELECT timestamp, created_at FROM inspection ORDER BY id DESC LIMIT 1")).first()
+            snap.clock_offset_s = _clock_offset(newest, now)
             if not snap.today:
                 snap.latest_hour = c.execute(text("SELECT MAX(hour) FROM hourly_stats")).scalar()
     except Exception as exc:  # noqa: BLE001 - keep the screen alive while the DB is busy/locked
@@ -238,6 +256,12 @@ def render(snap: Snapshot, st: Style, width: int = 80, interval: float | None = 
         err_age = _age(h.get("last_error_at"))
         if h.get("last_error") and err_age is not None and err_age < 3600:
             alerts.append(f"{_dur(err_age)} ago: {h['last_error'][:w - 20]}")
+
+    off = snap.clock_offset_s
+    if snap.pid and off is not None and abs(off) > 120:
+        m = int(abs(off) // 60)
+        alerts.append(f"sensor clock is {'ahead of' if off > 0 else 'behind'} this PC by {m // 60}h {m % 60:02d}m - "
+                      "all TODAY / hourly numbers use the SENSOR clock (set the sensor clock or ignore the offset)")
 
     # --- today ---------------------------------------------------------
     add("")
