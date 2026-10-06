@@ -22,6 +22,7 @@ from pathlib import Path
 from app.config import BASE_DIR, Settings
 
 KEEP_LOG_FILES = {"agent.lock", "agent.pid", "health.json"}
+PROTECTED = ("app", "scripts", "deploy", "tests", "credentials", ".git", ".venv")      # never emptied
 
 
 def _size(path: Path) -> tuple[int, int]:
@@ -55,6 +56,10 @@ def _unsafe(path: Path) -> str | None:
         return "it is a drive root or the home folder"
     if p == base or p in base.parents:
         return "it contains the program itself"
+    for name in PROTECTED:
+        prot = (base / name).resolve()
+        if p == prot or prot in p.parents or p in prot.parents:
+            return f"it is, or contains, the program folder '{name}'"
     return None
 
 

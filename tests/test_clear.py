@@ -76,3 +76,10 @@ def test_never_empties_program_or_root_folder():
 
 def test_cli_registered():
     assert "clear" in cli.COMMANDS
+
+
+def test_protected_program_folders_are_refused():
+    from app.config import BASE_DIR
+    for name in ("app", "scripts", "credentials", ".git"):
+        assert clear._unsafe(BASE_DIR / name) and clear._unsafe(BASE_DIR / name / "sub")
+    assert clear._unsafe(BASE_DIR / "data" / "archive") is None
