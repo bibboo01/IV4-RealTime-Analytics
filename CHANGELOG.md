@@ -4,6 +4,9 @@ Version number = `VERSION` file. Show it with `run version`; it also appears in 
 `run status`, the Google Sheets Status tab and `logs/health.json`.
 Rule: x.y.z - z = bug fix, y = new feature (data and settings stay compatible), x = needs manual steps.
 
+## 1.1.0 - 2026-10-06
+- Telegram notifications by work shift (3 shifts of 8 h by default, break optional): shift start, break progress, shift-end summary, and alerts while working (no data, files missing, backlog, disk, upload/Sheets errors). `run notify`, `run notify test|chatid|now`. New `.env` settings are optional; nothing to change if you do not use Telegram.
+
 ## 1.0.0 - 2026-10-06
 First production release.
 

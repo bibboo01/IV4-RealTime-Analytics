@@ -6,6 +6,7 @@ IV4 Data Agent - one command for everything.
     run clear               delete collected data to start from zero (agent must be stopped; asks first)
     run update <zip>        install a new version from a downloaded ZIP (no git; keeps .env, data, credentials)
     run stop                stop the agent (also the Windows task/service, so it does not restart)
+    run notify [test|chatid|now]   Telegram shift notifications: status / send a test / find chat id / preview
     run version             show the program version (see CHANGELOG.md)
     run status              is it running? backlog, errors, today's numbers
     run monitor             live screen: speed, today per sensor, hourly chart, NG (Ctrl+C quits)
@@ -200,6 +201,15 @@ def preflight(s: Settings) -> list[tuple[str, str]]:
         if not (s.gdrive_token and s.gdrive_token.exists()):
             add(WARN, "Google Drive/Sheets enabled but not signed in - run: run gdrive-auth")
 
+    if s.telegram_enabled:
+        from app.notify import parse_shifts
+        try:
+            parse_shifts(s.shifts)
+        except ConfigError as exc:
+            add(ERR, f"Telegram: {exc}")
+        if not (s.telegram_token and s.telegram_chat_id):
+            add(ERR, "Telegram is ON but IV4_TELEGRAM_TOKEN / IV4_TELEGRAM_CHAT_ID is empty (see: run notify chatid)")
+
     pid = InstanceLock(s.log_dir).running_pid()
     if pid:
         add(WARN, f"agent already running (pid {pid})")
@@ -362,6 +372,11 @@ def cmd_version(_args, s: Settings) -> int:
     return 0
 
 
+def cmd_notify(args, s: Settings) -> int:
+    from app import notify
+    return notify.run(args, s, InstanceLock(s.log_dir).running_pid)
+
+
 def cmd_upload(args, s: Settings) -> int:
     from app import diagnose
     return diagnose.run(args, s, InstanceLock(s.log_dir).running_pid)
@@ -445,6 +460,7 @@ COMMANDS = {
     "clear": cmd_clear,
     "update": cmd_update,
     "version": cmd_version,
+    "notify": cmd_notify,
     "monitor": _monitor,
     "sheets": cmd_sheets,
     "metrics": lambda a, s: _run_module_main("scripts.metrics", "run metrics", a),

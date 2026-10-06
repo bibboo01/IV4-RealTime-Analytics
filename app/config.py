@@ -108,6 +108,14 @@ class Settings:
     sheets_interval: float = 60.0       # seconds between updates (min 15; API limit is ~60 writes/min)
     sheets_title: str = "IV4 Dashboard"
 
+    # Telegram notifications by work shift (app/notify.py)
+    telegram_enabled: bool = False
+    telegram_token: str = ""
+    telegram_chat_id: str = ""
+    shifts: str = "A,07:00,15:00,11:00,12:00;B,15:00,23:00,19:00,20:00;C,23:00,07:00,03:00,04:00"
+    notify_no_data_min: int = 10        # alert when nothing arrived for this many minutes while working
+    notify_backlog: int = 200           # alert when this many files wait in incoming
+
     # Logging
     log_level: str = "INFO"
     log_max_bytes: int = 10 * 1024 * 1024
@@ -240,6 +248,12 @@ def load_settings(
         sheets_enabled=get("SHEETS_ENABLED", "false").lower() in {"1", "true", "yes"},
         sheets_interval=max(_f("SHEETS_INTERVAL", "60"), 15.0),
         sheets_title=get("SHEETS_TITLE", "IV4 Dashboard"),
+        telegram_enabled=get("TELEGRAM_ENABLED", "false").lower() in {"1", "true", "yes"},
+        telegram_token=get("TELEGRAM_TOKEN", "").strip(),
+        telegram_chat_id=get("TELEGRAM_CHAT_ID", "").strip(),
+        shifts=get("SHIFTS", "A,07:00,15:00,11:00,12:00;B,15:00,23:00,19:00,20:00;C,23:00,07:00,03:00,04:00").strip(),
+        notify_no_data_min=max(_i("NOTIFY_NO_DATA_MIN", "10"), 1),
+        notify_backlog=max(_i("NOTIFY_BACKLOG", "200"), 1),
         log_level=get("LOG_LEVEL", "INFO").upper(),
         log_max_bytes=_i("LOG_MAX_BYTES", "10485760"),
         log_backup_count=_i("LOG_BACKUP_COUNT", "10"),
