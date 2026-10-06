@@ -281,7 +281,7 @@ def cmd_status(_args, s: Settings) -> int:
 
     try:
         from app.database.repository import DatabaseRepository
-        from app.metrics import summarize
+        from app.metrics import miss_text, summarize
         repo = DatabaseRepository(s.database_path)
         today = datetime.now().strftime("%Y-%m-%d")
         rows = summarize(repo, today, None, by="day", per_sensor=True)
@@ -293,7 +293,7 @@ def cmd_status(_args, s: Settings) -> int:
             print("  no inspections yet" + (f" today - latest data is from {last}:00 (check the sensor clock?)"
                                              if last else ""))
         for r in rows:
-            miss = "-" if r.missing is None else f"{r.missing:,}"
+            miss = miss_text(r.missing, r.unknown_hours)
             print(f"  {r.sensor_id or '-':10} total {r.total:>9,}   NG {r.fail_count:>7,} ({r.ng_pct or 0:.2f}%)"
                   f"   missing {miss:>6}   run {r.active_hours} h")
         repo.dispose()

@@ -237,3 +237,44 @@ def test_stop_asks_running_agent_to_exit(tmp_path, capsys):
     assert cli.COMMANDS["stop"]([], s) == 0
     t.join(5)
     assert "Stopped." in capsys.readouterr().out
+
+
+def test_monitor_clock_offset_detects_sensor_clock_difference():
+    from datetime import datetime, timedelta
+    from app.monitor import _clock_offset
+    now = datetime(2026, 10, 6, 11, 14, 0)
+    received = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=10)
+    # sensor says 04:14 while this PC says 11:14 -> sensor is 7 h behind
+    off = _clock_offset(("2026-10-06 04:14:00", received.isoformat(sep=" ")), now)
+    assert round(off / 3600, 1) == -7.0
+    # same clock -> ~0
+    off = _clock_offset(("2026-10-06 11:13:50", received.isoformat(sep=" ")), now)
+    assert abs(off) < 2
+    # old data is not live -> no verdict
+    old = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=3)
+    assert _clock_offset(("2026-10-06 04:14:00", old.isoformat(sep=" ")), now) is None
+    assert _clock_offset(None, now) is None
+
+
+def test_monitor_live_per_minute_chart(settings, capsys):
+    now = datetime.now()
+    _seed_today(settings, now)            # one NG row stamped "now"
+    assert cli._monitor(["--once", "--no-color", "--live-hours", "2"], settings) == 0
+    out = capsys.readouterr().out
+    live = out.split(" LIVE", 1)[1].split("TOOLS TODAY", 1)[0]
+    rows = [ln for ln in live.splitlines() if ln.strip().startswith(f"{now:%H}:00")]
+    assert rows and "NG      1" in rows[0] and "█" in rows[0]           # current hour, one minute cell
+    import re
+    assert len([ln for ln in live.splitlines() if re.match(r"\s+\d\d:00 ", ln)]) == 2      # --live-hours 2
+    assert "LIVE" not in _render_without_live(settings)
+
+
+def _render_without_live(settings):
+    from app import monitor
+    from app.database.repository import DatabaseRepository
+    repo = DatabaseRepository(settings.database_path)
+    try:
+        snap = monitor.collect(repo, settings, 8, None, live_hours=0)
+    finally:
+        repo.dispose()
+    return "\n".join(monitor.render(snap, monitor.Style(False), 100))

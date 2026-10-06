@@ -1003,7 +1003,7 @@ run
 | `run check` | ตรวจความพร้อมอย่างเดียว |
 | `run stop` | **หยุด agent** อย่างปลอดภัย (รอเขียนข้อมูลที่ค้างให้เสร็จ, หยุด Task/Service `IV4DataAgent` ด้วยเพื่อไม่ให้เปิดกลับเอง) ถ้า 60 วินาทียังไม่หยุด ใช้ `run stop --force` |
 | `run status` | กำลังทำงานอยู่ไหม, ไฟล์ค้าง, error ล่าสุด, ยอดวันนี้แยก sensor (exit code 1 = ไม่ทำงาน/ผิดปกติ) |
-| `run monitor` | **หน้าจอ monitor สด** ใน terminal อัปเดตทุก 2 วินาที (ดูหัวข้อถัดไป) |
+| `run monitor` | **หน้าจอ monitor สด** ใน terminal อัปเดตทุก 2 วินาที มีกราฟ LAST 8 HOURS (รายชั่วโมง) และ LIVE (รายนาที แยกบรรทัดตามชั่วโมง ปรับด้วย `--live-hours 6`) (ดูหัวข้อถัดไป) |
 | `run metrics --by day --per-sensor` | รายงาน metric (`run metrics --help`) |
 | `run benchmark` | วัดว่าเครื่องนี้รองรับได้กี่ sensor |
 | `run gdrive-auth` | ล็อกอิน Google Drive ครั้งเดียว |

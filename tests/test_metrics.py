@@ -240,3 +240,16 @@ def test_count_pending_by_folder_prefix(repo):
     assert repo.count_pending_uploads(None, "2026-10-03/NG/") == 0
     repo.mark_uploaded("u1", "ref")
     assert repo.count_pending_uploads(None, "2026-10-03/OK/") == 0
+
+
+def test_counter_reset_in_one_hour_does_not_blank_the_day(repo):
+    # hour 18: triggers 100..109 with 8 received (2 missing); hour 19: counter restarted (reset)
+    for i in [0, 1, 2, 3, 5, 6, 8, 9]:
+        save(repo, rec(100 + i, ts="2026-10-03 18:10:00"))
+    for trig in (50000, 10, 11):            # jump back by more than 1000 -> counter reset
+        save(repo, rec(trig, ts="2026-10-03 19:10:00"))
+    from app.metrics import miss_text
+    (day,) = summarize(repo, "2026-10-03", "2026-10-04", by="day")
+    assert day.missing == 2 and day.unknown_hours == 1 and day.expected is None
+    assert miss_text(day.missing, day.unknown_hours) == "2*"
+    assert miss_text(None) == "-" and miss_text(0) == "0"

@@ -41,6 +41,7 @@ class PeriodStats:
     expected: int | None
     missing: int | None
     active_hours: int
+    unknown_hours: int = 0      # hours whose sensor counter reset: not included in `missing`
 
     def to_dict(self):
         return asdict(self)
@@ -93,23 +94,33 @@ def summarize(
                SUM(CASE WHEN trigger_resets = 0 AND trigger_min IS NOT NULL
                         THEN trigger_max - trigger_min + 1 END),
                SUM(CASE WHEN trigger_resets > 0 OR trigger_min IS NULL THEN 1 ELSE 0 END),
-               COUNT(DISTINCT CASE WHEN total > 0 THEN hour END)
+               COUNT(DISTINCT CASE WHEN total > 0 THEN hour END),
+               SUM(CASE WHEN trigger_resets = 0 AND trigger_min IS NOT NULL
+                        THEN MAX(trigger_max - trigger_min + 1 - total, 0) END)
         FROM hourly_stats {where}
         GROUP BY period, sensor ORDER BY period, sensor
     """
     out = []
     with repo.engine.connect() as conn:
         for row in conn.execute(text(sql), params):
-            p, sensor, total, ok, ng, unk, tsum, tcnt, tmax, expected, unknown_hours, active = row
+            p, sensor, total, ok, ng, unk, tsum, tcnt, tmax, expected, unknown_hours, active, missing_sum = row
             if unknown_hours:
                 expected = None
             out.append(PeriodStats(
                 period=p, sensor_id=sensor, total=total, active_hours=active, pass_count=ok, fail_count=ng, unknown_count=unk,
                 yield_pct=_pct(ok, total), ng_pct=_pct(ng, total),
                 avg_time_ms=round(tsum / tcnt, 2) if tcnt else None, max_time_ms=tmax,
-                expected=expected, missing=(max(expected - total, 0) if expected is not None else None),
+                expected=expected, missing=missing_sum,
+                unknown_hours=unknown_hours or 0,
             ))
     return out
+
+
+def miss_text(missing: int | None, unknown_hours: int = 0) -> str:
+    """'-' = cannot be measured; '12*' = 12 missing, plus hours (counter reset) that cannot be measured."""
+    if missing is None:
+        return "-"
+    return f"{missing:,}" + ("*" if unknown_hours else "")
 
 
 def tool_summary(
