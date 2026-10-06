@@ -58,6 +58,8 @@ from app.pipeline import PipelineError, archive_rel_path, prepare
 
 log = logging.getLogger("iv4.agent")
 
+STOP_FLAG = "stop.flag"        # created in log_dir by `run stop`
+
 DB_RETRY_INTERVAL = 30.0
 DB_MAX_ATTEMPTS = 20
 
@@ -435,8 +437,15 @@ class IV4Agent:
             self.sheets_worker = SheetsWorker(s, self.stop_event)
             self.sheets_worker.start()
 
+        stop_flag = s.log_dir / STOP_FLAG
+        stop_flag.unlink(missing_ok=True)      # leftover from an earlier `run stop`
         try:
             while not self.stop_event.is_set():
+                if stop_flag.exists():         # `run stop` (works on Windows, where signals cannot be sent)
+                    stop_flag.unlink(missing_ok=True)
+                    log.info("Stop requested (run stop)")
+                    self.stop()
+                    break
                 try:
                     self.scan_once()
                     if self.clock() - self._last_retry >= DB_RETRY_INTERVAL:

@@ -3,6 +3,7 @@ IV4 Data Agent - one command for everything.
 
     run                     start the agent (checks first; default)
     run check               preflight checks only
+    run stop                stop the agent (also the Windows task/service, so it does not restart)
     run status              is it running? backlog, errors, today's numbers
     run monitor             live screen: speed, today per sensor, hourly chart, NG (Ctrl+C quits)
     run metrics [...]       production metrics (see: run metrics --help)
@@ -300,6 +301,46 @@ def cmd_status(_args, s: Settings) -> int:
     return 0 if healthy else 1
 
 
+def cmd_stop(args, s: Settings) -> int:
+    """Ask the agent to finish what it is doing and exit; --force kills it if it does not."""
+    import time
+    from app.ingestion.watcher import STOP_FLAG
+
+    lock = InstanceLock(s.log_dir)
+    flag = s.log_dir / STOP_FLAG
+    if os.name == "nt":                 # a boot task/service would otherwise start it again
+        for cmd in (["schtasks", "/end", "/tn", "IV4DataAgent"], ["sc", "stop", "IV4DataAgent"]):
+            try:
+                subprocess.run(cmd, capture_output=True, timeout=30)
+            except (OSError, subprocess.SubprocessError):
+                pass
+    pid = lock.running_pid()
+    if not pid:
+        flag.unlink(missing_ok=True)
+        print("Agent is not running.")
+        return 0
+    print(f"Stopping agent (pid {pid}) - finishing the current batch...")
+    flag.write_text("stop")
+    deadline = time.time() + 60
+    while time.time() < deadline:
+        if not lock.running_pid():
+            print("Stopped.")
+            return 0
+        time.sleep(1)
+    flag.unlink(missing_ok=True)
+    if "--force" not in args:
+        print("Still running after 60 s. Wait a little more, or run: run stop --force")
+        return 1
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True)
+    else:
+        import signal
+        os.kill(int(pid), signal.SIGKILL)
+    time.sleep(1)
+    print("Stopped (forced)." if not lock.running_pid() else "Could not stop it - end the process manually.")
+    return 0 if not lock.running_pid() else 1
+
+
 def cmd_upload(args, s: Settings) -> int:
     from app import diagnose
     return diagnose.run(args, s, InstanceLock(s.log_dir).running_pid)
@@ -379,6 +420,7 @@ COMMANDS = {
     "start": cmd_start,
     "check": cmd_check,
     "status": cmd_status,
+    "stop": cmd_stop,
     "monitor": _monitor,
     "sheets": cmd_sheets,
     "metrics": lambda a, s: _run_module_main("scripts.metrics", "run metrics", a),
