@@ -92,7 +92,8 @@ run production --passive 50000-50100      # ทำจริง (ใส่ช่�
 | --- | --- |
 | ดูสถานะสดใน terminal | `run monitor` |
 | สรุปสั้น ๆ (ทำงานอยู่ไหม, ยอดวันนี้) | `run status` |
-| หยุดรัน | `run stop` |
+| หยุดรัน | `run clear` | **ล้างข้อมูลเริ่มใหม่** ลบฐานข้อมูล + รูปที่เก็บไว้ (ต้อง `run stop` ก่อน และต้องพิมพ์ `CLEAR` ยืนยัน) ไม่แตะ `.env`, การล็อกอิน Google, backup และไฟล์ที่อยู่บน Drive แล้ว ตัวเลือก: `--dry-run` (ดูก่อนไม่ลบ) `--db-only` `--images-only` `--incoming` `--logs` `--yes` |
+| `run stop` |
 | รายงาน/ส่งออก Excel | `run metrics --by day --per-sensor --csv report.csv` |
 | Dashboard บน Google Sheets | `run sheets` (หรือเปิดลิงก์ที่ได้) |
 | ตรวจว่าทำไมไม่อัปโหลด | `run upload` |
