@@ -74,6 +74,35 @@ def verify_image(path: Path) -> None:
         raise PipelineError("IMAGE", f"{path.name} is not a valid image ({exc})") from exc
 
 
+def shrink_image(path: Path, size: tuple[int, int], quality: int = 85) -> bool:
+    """
+    Replace the JPG by a version that fits inside ``size`` (never enlarges). The new file is
+    written next to it, re-opened to prove it is valid, and only then does it replace the
+    original. Any problem leaves the original untouched. True when the file was replaced.
+    """
+    try:
+        from PIL import Image
+    except ImportError:
+        return False
+    tmp = path.with_name(path.stem + ".resize.tmp")
+    try:
+        with Image.open(path) as img:
+            if img.format != "JPEG" or (img.width <= size[0] and img.height <= size[1]):
+                return False
+            small = img.convert("RGB")
+            small.thumbnail(size, Image.LANCZOS)
+            small.save(tmp, "JPEG", quality=quality, optimize=True)
+        with Image.open(tmp) as check:
+            check.verify()
+        tmp.replace(path)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        log.warning("[RESIZE] %s kept as original: %s", path.name, exc)
+        return False
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 @dataclass
 class Prepared:
     """Everything computed for one inspection before touching the database."""

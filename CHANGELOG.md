@@ -4,6 +4,9 @@ Version number = `VERSION` file. Show it with `run version`; it also appears in 
 `run status`, the Google Sheets Status tab and `logs/health.json`.
 Rule: x.y.z - z = bug fix, y = new feature (data and settings stay compatible), x = needs manual steps.
 
+## 1.2.0 - 2026-10-07
+- Optional `IV4_RESIZE_OK=640x480`: OK (PASS) images are shrunk when archived, so they take ~3-4x less disk and upload much less. NG/UNKNOWN images keep the original. The new file is checked before it replaces the original; on any problem the original stays. Off by default (`IV4_RESIZE_QUALITY` default 85). This does not reduce the FTP load from the sensor - set that on the IV4 itself.
+
 ## 1.1.4 - 2026-10-07
 - Telegram: when Telegram cannot be reached, `run notify test|chatid` now says why (DNS, firewall/proxy, HTTPS certificate) and what to ask IT for.
 

@@ -54,7 +54,7 @@ from app.ingestion.record import (
 )
 from app.ingestion.stability import StabilityTracker
 from app.maintenance import MaintenanceWorker, disk_free_gb
-from app.pipeline import PipelineError, archive_rel_path, prepare
+from app.pipeline import PipelineError, archive_rel_path, prepare, shrink_image
 from app.version import read_version
 
 log = logging.getLogger("iv4.agent")
@@ -317,6 +317,9 @@ class IV4Agent:
             self.stats["last_success_at"] = utc_now()
 
     def _finalize(self, p) -> None:
+        size = self.settings.resize_ok
+        if size and p.analysis.status == "PASS" and p.manifest.get("image"):
+            shrink_image(p.folder / p.manifest["image"], size, self.settings.resize_quality)
         save_manifest(p.manifest, p.folder)
         self._archive(p.folder, p.manifest)
 
