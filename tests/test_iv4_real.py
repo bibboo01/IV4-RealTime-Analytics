@@ -251,3 +251,31 @@ def test_resize_ok_only_shrinks_pass_images(tmp_path, clock):
         assert ng_sizes and all(x > 16 for x in ng_sizes)
     finally:
         repo.dispose()
+
+
+def test_locked_db_does_not_stall_every_batch(tmp_path, clock, monkeypatch):
+    s = load_settings(base_dir=tmp_path, overrides={
+        "IV4_SETTLE_SECONDS": "1.0", "IV4_SCAN_INTERVAL": "0.1", "IV4_BATCH_SIZE": "1"})
+    s.ensure_dirs()
+    repo = DatabaseRepository(s.database_path)
+    try:
+        agent = IV4Agent(s, repo, clock=clock)
+        calls = []
+
+        def locked(_items):
+            calls.append(1)
+            raise sqlite3.OperationalError("database is locked")
+
+        monkeypatch.setattr(repo, "save_batch", locked)
+        for stem in [f.stem for f in sorted(IV4.glob("0*.txt"))]:
+            drop(s.incoming_dir, stem)
+        settle(agent, clock)
+        assert len(calls) <= 4          # one failed attempt per pass, not one per queued batch
+        monkeypatch.undo()
+        for _ in range(20):             # once the lock is gone everything is saved (nothing lost)
+            agent.recover_processing()
+            agent.scan_once()
+            clock.advance(1.1)
+        assert repo.count() == 5
+    finally:
+        repo.dispose()

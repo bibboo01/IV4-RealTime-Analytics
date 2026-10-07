@@ -4,6 +4,9 @@ Version number = `VERSION` file. Show it with `run version`; it also appears in 
 `run status`, the Google Sheets Status tab and `logs/health.json`.
 Rule: x.y.z - z = bug fix, y = new feature (data and settings stay compatible), x = needs manual steps.
 
+## 1.2.1 - 2026-10-07
+- When the database is locked or busy, the agent now stops after the first failed batch of a pass (retrying at the next pass) instead of waiting for the lock once per queued batch, so one lock no longer freezes the agent for minutes. Nothing is lost: files stay in incoming/processing and are saved when the database is free.
+
 ## 1.2.0 - 2026-10-07
 - Optional `IV4_RESIZE_OK=640x480`: OK (PASS) images are shrunk when archived, so they take ~3-4x less disk and upload much less. NG/UNKNOWN images keep the original. The new file is checked before it replaces the original; on any problem the original stays. Off by default (`IV4_RESIZE_QUALITY` default 85). This does not reduce the FTP load from the sensor - set that on the IV4 itself.
 
