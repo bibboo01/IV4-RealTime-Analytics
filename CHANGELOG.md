@@ -4,6 +4,9 @@ Version number = `VERSION` file. Show it with `run version`; it also appears in 
 `run status`, the Google Sheets Status tab and `logs/health.json`.
 Rule: x.y.z - z = bug fix, y = new feature (data and settings stay compatible), x = needs manual steps.
 
+## 1.1.2 - 2026-10-07
+- Upload marks finished files in one short DB transaction per 20 files instead of one per file, so it clashes less with ingestion ("database is locked").
+
 ## 1.1.1 - 2026-10-07
 - Speed when data grows: SQLite page cache raised (`IV4_DB_CACHE_MB`, default 128), at most 600 inspections per scan pass (a backlog no longer makes each pass slower), 0.2 s minimum between passes.
 - `run monitor` shows `Time/file` (list / move / parse / db / archive in ms) and `capacity ~N files/s`, with an alert when the sensor sends faster than the PC can handle. Same data in `logs/health.json`.

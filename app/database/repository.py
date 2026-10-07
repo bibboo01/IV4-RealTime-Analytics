@@ -575,6 +575,15 @@ class DatabaseRepository:
                 update(Inspection).where(Inspection.uid == uid).values(uploaded_at=_utcnow(), upload_ref=ref)
             )
 
+    def mark_uploaded_many(self, marks: list[tuple[str, str | None]]) -> None:
+        """One short write transaction for a whole upload batch (fewer clashes with ingestion)."""
+        if not marks:
+            return
+        now = _utcnow()
+        with self.engine.begin() as conn:
+            for uid, ref in marks:
+                conn.execute(update(Inspection).where(Inspection.uid == uid).values(uploaded_at=now, upload_ref=ref))
+
     def delete_rows_before(self, cutoff: datetime, batch: int = 5000) -> int:
         """Delete per-inspection rows older than cutoff (UTC) in small batches."""
         total = 0

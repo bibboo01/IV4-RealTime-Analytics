@@ -57,13 +57,21 @@ def process_upload_queue(
     repo = repo or DatabaseRepository(settings.database_path)
     uploader = uploader or make_uploader(settings)
     uploaded = 0
+    marks: list[tuple[str, str | None]] = []
+
+    def flush() -> None:
+        nonlocal marks
+        if marks:
+            repo.mark_uploaded_many(marks)      # on a locked DB this raises and the batch is retried later
+            marks = []
+
     try:
         for uid, folder in pending_uploads(settings, repo):
             if stop_event is not None and stop_event.is_set():
                 break
             if not folder.exists():
                 log.warning("[UPLOAD] %s: files no longer on disk (retention?) - skipped", uid)
-                repo.mark_uploaded(uid, "MISSING")
+                marks.append((uid, "MISSING"))
                 continue
             manifest = load_manifest(folder) or {"uid": uid}
             try:
@@ -74,8 +82,11 @@ def process_upload_queue(
                 log.warning("[UPLOAD RETRY] %s: %s", uid, exc)
                 continue
             if ref:
-                repo.mark_uploaded(uid, ref if isinstance(ref, str) else settings.upload_backend)
+                marks.append((uid, ref if isinstance(ref, str) else settings.upload_backend))
                 uploaded += 1
+                if len(marks) >= 20:
+                    flush()
+        flush()
     finally:
         if own_repo:
             repo.dispose()
