@@ -68,6 +68,8 @@ class Settings:
     group_timeout: float = 120.0        # incomplete group -> error after this
     expected_images: int = 1
     expected_texts: int = 1             # real IV4: 1 image + 1 result TXT
+    resize_ok: tuple[int, int] | None = None   # shrink OK (PASS) images to fit WxH when archived; NG keep the original
+    resize_quality: int = 85
     verify_images: bool = True          # open JPG with Pillow to catch truncation
     use_polling: bool = False           # True for network shares (SMB) where events are unreliable
     workers: int = 0                    # file-work threads; 0 = auto (2 x CPU cores, max 16)
@@ -165,6 +167,21 @@ class Settings:
         return out
 
 
+def _size(value: str) -> tuple[int, int] | None:
+    """'640x480' -> (640, 480); empty/off -> None."""
+    v = value.strip().lower()
+    if not v or v in {"0", "off", "false", "no"}:
+        return None
+    try:
+        w, h = v.replace("*", "x").split("x")
+        w, h = int(w), int(h)
+        if w < 16 or h < 16:
+            raise ValueError
+        return w, h
+    except ValueError:
+        raise ConfigError(f"IV4_RESIZE_OK={value!r} must look like 640x480 (or empty to keep originals)") from None
+
+
 def _statuses(value: str) -> frozenset[str] | None:
     value = value.strip().upper()
     if value in {"", "ALL", "*"}:
@@ -220,6 +237,8 @@ def load_settings(
         group_timeout=_f("GROUP_TIMEOUT", "120"),
         expected_images=_i("EXPECTED_IMAGES", "1"),
         expected_texts=_i("EXPECTED_TEXTS", "1"),
+        resize_ok=_size(get("RESIZE_OK", "")),
+        resize_quality=min(max(_i("RESIZE_QUALITY", "85"), 30), 100),
         verify_images=get("VERIFY_IMAGES", "true").lower() in {"1", "true", "yes"},
         use_polling=get("USE_POLLING", "false").lower() in {"1", "true", "yes"},
         workers=_i("WORKERS", "0"),

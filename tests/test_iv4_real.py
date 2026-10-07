@@ -230,3 +230,24 @@ def test_scan_work_is_bounded(iv4_settings, clock, monkeypatch):
         assert repo.count() == 5             # the backlog still drains
     finally:
         repo.dispose()
+
+
+def test_resize_ok_only_shrinks_pass_images(tmp_path, clock):
+    from PIL import Image
+
+    s = load_settings(base_dir=tmp_path, overrides={
+        "IV4_SETTLE_SECONDS": "1.0", "IV4_SCAN_INTERVAL": "0.1", "IV4_RESIZE_OK": "16x16"})
+    s.ensure_dirs()
+    repo = DatabaseRepository(s.database_path)
+    try:
+        agent = IV4Agent(s, repo, clock=clock)
+        for stem in [f.stem for f in sorted(IV4.glob("0*.txt"))]:
+            drop(s.incoming_dir, stem)
+        drop(s.incoming_dir, "00004_03102026_182105", NG_TXT)
+        settle(agent, clock)
+        ok_sizes = [max(Image.open(j).size) for j in s.archive_dir.rglob("OK/**/*.jpg")]
+        ng_sizes = [max(Image.open(j).size) for d in ("NG", "UNKNOWN") for j in s.archive_dir.rglob(f"{d}/**/*.jpg")]
+        assert ok_sizes and all(x <= 16 for x in ok_sizes)
+        assert ng_sizes and all(x > 16 for x in ng_sizes)
+    finally:
+        repo.dispose()
