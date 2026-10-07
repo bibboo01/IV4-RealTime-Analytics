@@ -4,6 +4,9 @@ Version number = `VERSION` file. Show it with `run version`; it also appears in 
 `run status`, the Google Sheets Status tab and `logs/health.json`.
 Rule: x.y.z - z = bug fix, y = new feature (data and settings stay compatible), x = needs manual steps.
 
+## 1.1.4 - 2026-10-07
+- Telegram: when Telegram cannot be reached, `run notify test|chatid` now says why (DNS, firewall/proxy, HTTPS certificate) and what to ask IT for.
+
 ## 1.1.3 - 2026-10-07
 - `run monitor` / `run status` open while the agent is busy: opening the database no longer takes a write lock when the schema is already current ("database is locked" at start-up).
 

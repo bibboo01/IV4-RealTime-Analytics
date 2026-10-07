@@ -210,6 +210,24 @@ def build_message(kind: str, shift: Shift, start: datetime, end: datetime, summa
 # telegram
 # ------------------------------------------------------------------
 
+def _net_error(exc: Exception) -> str:
+    """Why Telegram could not be reached (never contains the token)."""
+    reason = getattr(exc, "reason", exc)
+    text = f"{type(reason).__name__}: {reason}"
+    low = text.lower()
+    if "certificate" in low or "ssl" in low:
+        hint = "the company network inspects HTTPS (certificate) - ask IT to allow api.telegram.org"
+    elif "getaddrinfo" in low or "name or service" in low or "11001" in low:
+        hint = "DNS cannot find api.telegram.org - check internet/DNS or a proxy"
+    elif "timed out" in low or "10060" in low:
+        hint = "no answer - a firewall or proxy is probably blocking api.telegram.org (port 443)"
+    elif "refused" in low or "10061" in low or "forbidden" in low or "10013" in low:
+        hint = "connection blocked - firewall/antivirus/proxy"
+    else:
+        hint = "check internet, proxy and firewall"
+    return f"cannot reach Telegram ({text[:120]}) -> {hint}"
+
+
 def send_telegram(token: str, chat_id: str, message: str, timeout: float = 10.0) -> tuple[bool, str]:
     """(ok, error). The token never appears in the returned text."""
     req = urllib.request.Request(
@@ -229,7 +247,7 @@ def send_telegram(token: str, chat_id: str, message: str, timeout: float = 10.0)
                 403: "the bot was blocked or is not in the group"}.get(exc.code, "")
         return False, f"Telegram {exc.code}: {desc or hint}".strip()
     except Exception as exc:  # noqa: BLE001 - offline, DNS, timeout
-        return False, f"cannot reach Telegram: {type(exc).__name__}"
+        return False, _net_error(exc)
 
 
 def find_chat_ids(token: str, timeout: float = 10.0) -> tuple[list[tuple[str, str]], str]:
@@ -238,7 +256,7 @@ def find_chat_ids(token: str, timeout: float = 10.0) -> tuple[list[tuple[str, st
         with urllib.request.urlopen(f"https://api.telegram.org/bot{token}/getUpdates", timeout=timeout) as r:
             data = json.loads(r.read().decode())
     except Exception as exc:  # noqa: BLE001
-        return [], f"cannot reach Telegram: {type(exc).__name__}"
+        return [], _net_error(exc)
     seen: dict[str, str] = {}
     for u in data.get("result", []):
         msg = u.get("message") or u.get("channel_post") or u.get("my_chat_member") or {}
