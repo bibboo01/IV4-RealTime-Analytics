@@ -71,6 +71,7 @@ class Settings:
     verify_images: bool = True          # open JPG with Pillow to catch truncation
     use_polling: bool = False           # True for network shares (SMB) where events are unreliable
     workers: int = 0                    # file-work threads; 0 = auto (2 x CPU cores, max 16)
+    db_cache_mb: int = 128              # SQLite page cache of the agent (default SQLite = 2 MB: slow on a big database)
     batch_size: int = 200               # inspections per DB transaction
 
     # IV4 source
@@ -225,6 +226,7 @@ def load_settings(
         batch_size=_i("BATCH_SIZE", "200"),
         date_format=get("DATE_FORMAT", "%d/%m/%Y"),
         time_offset_hours=_f("TIME_OFFSET_HOURS", "0"),
+        db_cache_mb=max(_i("DB_CACHE_MB", "128"), 8),
         sensor_id=get("SENSOR_ID", "IV4-01") or None,
         sensors=tuple(x.strip() for x in get("SENSORS", "").split(",") if x.strip()),
         machine_id=get("MACHINE_ID", "") or None,

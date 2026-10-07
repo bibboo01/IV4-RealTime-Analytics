@@ -196,3 +196,37 @@ def test_time_offset_moves_hour_and_archive_folder(tmp_path, clock):
         assert rec.folder.startswith("2026-10-03/OK/16/")
     finally:
         repo.dispose()
+
+
+def test_timing_and_capacity_in_health(iv4_settings, clock):
+    repo = DatabaseRepository(iv4_settings.database_path)
+    try:
+        agent = IV4Agent(iv4_settings, repo, clock=clock)
+        for stem in [f.stem for f in sorted(IV4.glob("0*.txt"))]:
+            drop(iv4_settings.incoming_dir, stem)
+        settle(agent, clock)
+        agent.write_health()
+        h = json.loads((iv4_settings.log_dir / "health.json").read_text())
+        assert {"scan", "claim", "parse", "db", "archive"} <= set(h["timing_ms"])
+        assert h["capacity_per_s"] and h["capacity_per_s"] > 0
+    finally:
+        repo.dispose()
+
+
+def test_scan_work_is_bounded(iv4_settings, clock, monkeypatch):
+    import app.ingestion.watcher as w
+
+    monkeypatch.setattr(w, "MAX_GROUPS_PER_SCAN", 2)
+    repo = DatabaseRepository(iv4_settings.database_path)
+    try:
+        agent = IV4Agent(iv4_settings, repo, clock=clock)
+        for stem in [f.stem for f in sorted(IV4.glob("0*.txt"))]:      # 5 inspections
+            drop(iv4_settings.incoming_dir, stem)
+        settle(agent, clock)
+        assert 0 < repo.count() < 5          # a pass never takes more than the cap
+        for _ in range(6):
+            agent.scan_once()
+            clock.advance(1.1)
+        assert repo.count() == 5             # the backlog still drains
+    finally:
+        repo.dispose()

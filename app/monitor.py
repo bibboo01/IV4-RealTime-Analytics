@@ -255,6 +255,16 @@ def render(snap: Snapshot, st: Style, width: int = 80, interval: float | None = 
         add(f" Speed       {st.bold(speed)}{' ' * max(36 - len(speed), 2)}Waiting  " + (st.yellow(wait_s) if wait > BACKLOG_WARN else wait_s))
         if wait > BACKLOG_WARN:
             alerts.append(f"{wait:,} files waiting in incoming - the agent is falling behind")
+        tm = h.get("timing_ms") or {}
+        if tm:
+            cap = h.get("capacity_per_s")
+            names = (("scan", "list"), ("claim", "move"), ("parse", "parse"), ("db", "db"), ("archive", "archive"))
+            add(" Time/file  " + "  ".join(f"{lab} {tm[k]:.0f}" for k, lab in names if k in tm) + " ms"
+                + (f"   capacity ~{cap:,.0f} files/s" if cap else ""))
+            cur = sum(lm.values()) / 60
+            if cap and cur > 0.8 * cap:
+                alerts.append(f"the PC handles ~{cap:,.0f} files/s but the sensor sends {cur:,.1f}/s - "
+                              "it will fall behind (see Time/file for the slow step)")
         res = (f" Session  processed {_n(h.get('processed'))}   PASS {_n(h.get('pass'))}   "
                f"FAIL {_n(h.get('fail'))}   UNKNOWN {_n(h.get('unknown'))}   dup {_n(h.get('duplicates'))}")
         add(res)

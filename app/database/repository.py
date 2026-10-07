@@ -266,6 +266,11 @@ def _hour_key(record: InspectionRecord) -> str:
 
 class DatabaseRepository:
 
+    # SQLite's own default page cache is only 2 MB: with a multi-GB database the random-key indexes
+    # (uid, content_hash) no longer fit and every insert turns into disk reads. The agent sets this from
+    # IV4_DB_CACHE_MB at start-up; small helper tools (status, monitor) keep the modest default.
+    DEFAULT_CACHE_MB = 64
+
     def __init__(self, database_path: str | Path):
 
         self.database_path = Path(database_path)
@@ -282,6 +287,8 @@ class DatabaseRepository:
             cur.execute("PRAGMA journal_mode=WAL")       # readers (dashboard) don't block writer
             cur.execute("PRAGMA synchronous=NORMAL")
             cur.execute("PRAGMA busy_timeout=30000")
+            cur.execute(f"PRAGMA cache_size=-{int(DatabaseRepository.DEFAULT_CACHE_MB) * 1024}")
+            cur.execute("PRAGMA temp_store=MEMORY")
             cur.close()
 
         self._migrate_legacy()
