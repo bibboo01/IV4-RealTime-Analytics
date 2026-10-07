@@ -294,8 +294,13 @@ class DatabaseRepository:
         self._migrate_legacy()
         Base.metadata.create_all(self.engine)
         self._add_missing_columns()
-        with self.engine.begin() as conn:
-            conn.execute(text(f"PRAGMA user_version={SCHEMA_VERSION}"))
+        # Write only when it changes: a write needs the database lock, and read-only tools
+        # (monitor, status) must still open while the agent is busy writing.
+        with self.engine.connect() as conn:
+            current = conn.execute(text("PRAGMA user_version")).scalar()
+        if current != SCHEMA_VERSION:
+            with self.engine.begin() as conn:
+                conn.execute(text(f"PRAGMA user_version={SCHEMA_VERSION}"))
 
     # --------------------------------------------------------
     # Migration from the v1 schema (inspection_id UNIQUE, no uid)
@@ -334,8 +339,12 @@ class DatabaseRepository:
 
     def _add_missing_columns(self) -> None:
         """v2 -> v3+: add new nullable columns in place (SQLite ALTER TABLE ADD COLUMN)."""
-        existing = {c["name"] for c in inspect(self.engine).get_columns("inspection")}
+        insp = inspect(self.engine)
+        existing = {c["name"] for c in insp.get_columns("inspection")}
+        have_idx = {i["name"] for i in insp.get_indexes("inspection")}
         table = Base.metadata.tables["inspection"]
+        if existing >= {c.name for c in table.columns} and have_idx >= {i.name for i in table.indexes}:
+            return                      # nothing to change -> no write lock needed
         with self.engine.begin() as conn:
             for col in table.columns:
                 if col.name in existing:

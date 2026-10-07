@@ -4,6 +4,9 @@ Version number = `VERSION` file. Show it with `run version`; it also appears in 
 `run status`, the Google Sheets Status tab and `logs/health.json`.
 Rule: x.y.z - z = bug fix, y = new feature (data and settings stay compatible), x = needs manual steps.
 
+## 1.1.3 - 2026-10-07
+- `run monitor` / `run status` open while the agent is busy: opening the database no longer takes a write lock when the schema is already current ("database is locked" at start-up).
+
 ## 1.1.2 - 2026-10-07
 - Upload marks finished files in one short DB transaction per 20 files instead of one per file, so it clashes less with ingestion ("database is locked").
 
