@@ -63,6 +63,8 @@ STOP_FLAG = "stop.flag"        # created in log_dir by `run stop`
 
 DB_RETRY_INTERVAL = 30.0
 DB_MAX_ATTEMPTS = 20
+MAX_GROUPS_PER_SCAN = 600      # bounded work per pass; the rest is picked up by the next pass
+MIN_SCAN_GAP = 0.2             # seconds between passes (file events arrive in bursts)
 
 
 class _WakeHandler(FileSystemEventHandler):
@@ -98,6 +100,7 @@ class IV4Agent:
         self.pool = ThreadPoolExecutor(max_workers=settings.worker_count(), thread_name_prefix="iv4-worker")
         self._last_retry = 0.0
 
+        self.timing: dict[str, float] = {}      # moving average, ms per file (see _tick)
         self.stats = {
             "version": read_version(),
             "started_at": utc_now(),
@@ -116,10 +119,17 @@ class IV4Agent:
     # Scan incoming/
     # ------------------------------------------------------------
 
+    def _tick(self, stage: str, seconds: float, files: int = 1) -> None:
+        """Moving average of wall time per file for one stage (shown by `run monitor`)."""
+        ms = seconds * 1000.0 / max(1, files)
+        old = self.timing.get(stage)
+        self.timing[stage] = ms if old is None else old * 0.8 + ms * 0.2
+
     def scan_once(self) -> None:
         """One pass over incoming/ and every sensor subfolder incoming/<sensor>/."""
         s = self.settings
         sources = s.sensor_sources()
+        t0 = time.monotonic()
         found: list[tuple[str, Path, str, list[Path]]] = []
         for sensor, folder in sources:
             groups = find_groups(folder, s.supported_image_ext, s.supported_text_ext)
@@ -129,8 +139,13 @@ class IV4Agent:
         now = self.clock()
         root = s.incoming_dir
 
+        # Oldest first and a bounded amount of work per pass, so a big backlog
+        # never makes a single pass (and the health/monitor refresh) take minutes.
+        found = sorted(found, key=lambda x: (x[0], x[2]))[:MAX_GROUPS_PER_SCAN]
+        self._tick("scan", time.monotonic() - t0, len(found))
+
         ready: list[GroupStatus] = []
-        for sensor, folder, group_id, files in sorted(found, key=lambda x: (x[0], x[2])):
+        for sensor, folder, group_id, files in found:
             if self.stop_event.is_set():
                 return
 
@@ -168,7 +183,9 @@ class IV4Agent:
             if self.stop_event.is_set():
                 return
             chunk = ready[i:i + bs]
+            t1 = time.monotonic()
             claimed = [c for c in self.pool.map(self._claim, chunk) if c is not None]
+            self._tick("claim", time.monotonic() - t1, len(chunk))
             for st in chunk:
                 self.tracker.forget(st.files)
             self._process_claimed(claimed)
@@ -240,7 +257,9 @@ class IV4Agent:
             return
 
         # 1. parse/analyse in parallel
+        t1 = time.monotonic()
         results = list(self.pool.map(self._prepare, items))
+        self._tick("parse", time.monotonic() - t1, len(items))
         good = []
         for (folder, manifest), res in zip(items, results):
             if isinstance(res, Exception):
@@ -252,6 +271,7 @@ class IV4Agent:
             return
 
         # 2. one DB transaction for the whole batch
+        t1 = time.monotonic()
         try:
             saved = self.repo.save_batch([
                 dict(record=p.record, analysis=p.analysis, uid=p.manifest["uid"],
@@ -269,6 +289,7 @@ class IV4Agent:
             log.error("[DB RETRY] %d inspection(s) attempt=%d: %s", len(good), good[0].manifest["attempts"], exc)
             self._record_error(f"DATABASE: {exc}")
             return
+        self._tick("db", time.monotonic() - t1, len(good))
 
         # 3. finalize (manifest DONE + archive move) in parallel
         done = []
@@ -281,7 +302,10 @@ class IV4Agent:
                               database_id=db_id, archive=p.archive_rel)
             done.append((p, action))
 
+        t1 = time.monotonic()
         list(self.pool.map(lambda pa: self._finalize(pa[0]), done))
+        if done:
+            self._tick("archive", time.monotonic() - t1, len(done))
 
         for p, action in done:
             self.stats["processed"] += 1
@@ -364,8 +388,13 @@ class IV4Agent:
             except OSError:
                 per_sensor[key] = -1
         pending = sum(v for v in per_sensor.values() if v > 0)
+        t = {k: round(v, 1) for k, v in self.timing.items()}
+        # wall-clock per inspection across stages -> how many files/s this PC can sustain
+        per_file = sum(t.get(k, 0.0) for k in ("scan", "claim", "parse", "db", "archive"))
         health = {
             **self.stats,
+            "timing_ms": t,
+            "capacity_per_s": round(1000.0 / per_file, 1) if per_file > 0 else None,
             "heartbeat_at": utc_now(),
             "incoming_files": pending,
             "incoming_by_sensor": per_sensor,
@@ -469,6 +498,7 @@ class IV4Agent:
                     log.exception("[SCAN] unexpected error; continuing")
                 self.wake.wait(s.scan_interval)
                 self.wake.clear()
+                self.stop_event.wait(MIN_SCAN_GAP)     # coalesce bursts of file events
         finally:
             if observer is not None:
                 observer.stop()
@@ -508,6 +538,7 @@ def main() -> None:
 
     settings = load_settings()
     setup_logging(settings)
+    DatabaseRepository.DEFAULT_CACHE_MB = settings.db_cache_mb
     agent = IV4Agent(settings)
 
     signal.signal(signal.SIGINT, agent.stop)

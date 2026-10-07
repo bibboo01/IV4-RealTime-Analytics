@@ -266,6 +266,11 @@ def _hour_key(record: InspectionRecord) -> str:
 
 class DatabaseRepository:
 
+    # SQLite's own default page cache is only 2 MB: with a multi-GB database the random-key indexes
+    # (uid, content_hash) no longer fit and every insert turns into disk reads. The agent sets this from
+    # IV4_DB_CACHE_MB at start-up; small helper tools (status, monitor) keep the modest default.
+    DEFAULT_CACHE_MB = 64
+
     def __init__(self, database_path: str | Path):
 
         self.database_path = Path(database_path)
@@ -282,13 +287,20 @@ class DatabaseRepository:
             cur.execute("PRAGMA journal_mode=WAL")       # readers (dashboard) don't block writer
             cur.execute("PRAGMA synchronous=NORMAL")
             cur.execute("PRAGMA busy_timeout=30000")
+            cur.execute(f"PRAGMA cache_size=-{int(DatabaseRepository.DEFAULT_CACHE_MB) * 1024}")
+            cur.execute("PRAGMA temp_store=MEMORY")
             cur.close()
 
         self._migrate_legacy()
         Base.metadata.create_all(self.engine)
         self._add_missing_columns()
-        with self.engine.begin() as conn:
-            conn.execute(text(f"PRAGMA user_version={SCHEMA_VERSION}"))
+        # Write only when it changes: a write needs the database lock, and read-only tools
+        # (monitor, status) must still open while the agent is busy writing.
+        with self.engine.connect() as conn:
+            current = conn.execute(text("PRAGMA user_version")).scalar()
+        if current != SCHEMA_VERSION:
+            with self.engine.begin() as conn:
+                conn.execute(text(f"PRAGMA user_version={SCHEMA_VERSION}"))
 
     # --------------------------------------------------------
     # Migration from the v1 schema (inspection_id UNIQUE, no uid)
@@ -327,8 +339,12 @@ class DatabaseRepository:
 
     def _add_missing_columns(self) -> None:
         """v2 -> v3+: add new nullable columns in place (SQLite ALTER TABLE ADD COLUMN)."""
-        existing = {c["name"] for c in inspect(self.engine).get_columns("inspection")}
+        insp = inspect(self.engine)
+        existing = {c["name"] for c in insp.get_columns("inspection")}
+        have_idx = {i["name"] for i in insp.get_indexes("inspection")}
         table = Base.metadata.tables["inspection"]
+        if existing >= {c.name for c in table.columns} and have_idx >= {i.name for i in table.indexes}:
+            return                      # nothing to change -> no write lock needed
         with self.engine.begin() as conn:
             for col in table.columns:
                 if col.name in existing:
@@ -567,6 +583,15 @@ class DatabaseRepository:
             conn.execute(
                 update(Inspection).where(Inspection.uid == uid).values(uploaded_at=_utcnow(), upload_ref=ref)
             )
+
+    def mark_uploaded_many(self, marks: list[tuple[str, str | None]]) -> None:
+        """One short write transaction for a whole upload batch (fewer clashes with ingestion)."""
+        if not marks:
+            return
+        now = _utcnow()
+        with self.engine.begin() as conn:
+            for uid, ref in marks:
+                conn.execute(update(Inspection).where(Inspection.uid == uid).values(uploaded_at=now, upload_ref=ref))
 
     def delete_rows_before(self, cutoff: datetime, batch: int = 5000) -> int:
         """Delete per-inspection rows older than cutoff (UTC) in small batches."""
