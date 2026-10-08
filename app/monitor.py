@@ -86,6 +86,7 @@ class Snapshot:
     live: dict = field(default_factory=dict)    # 'YYYY-MM-DD HH' -> {minute: (total, ng)}
     ng_alert_pct: float = 0.0               # alert when this hour's NG% reaches it (0 = off)
     ng_alert_min: int = 200
+    drift: list = field(default_factory=list)
 
 
 def _read_health(s: Settings) -> dict | None:
@@ -145,6 +146,8 @@ def collect(repo, s: Settings, hours: int, pid: str | None, now: datetime | None
         snap.this_hour = summarize(repo, cur_hour, tomorrow, by="hour", per_sensor=True)
         snap.hours = summarize(repo, first_hour, tomorrow, by="hour")
         snap.tools = tool_summary(repo, today, tomorrow, per_sensor=True)
+        from app.drift import find_drift
+        snap.drift = find_drift(repo, now, s.drift_pct, s.drift_min)
         if live_hours > 0:
             snap.live = live_minutes(repo, now, live_hours)
         since = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=60)
@@ -334,6 +337,8 @@ def render(snap: Snapshot, st: Style, width: int = 80, interval: float | None = 
         if any(r.unknown_hours or r.missing is None for r in rows):
             add(st.dim("  Missing: '*' = plus hours where the sensor counter restarted (not measurable); "
                        "'-' = no measurable hour yet"))
+        for d in snap.drift[:3]:
+            alerts.append("drift: " + d.describe() + " - check lens, light, material lot")
         for r in snap.this_hour:
             if snap.ng_alert_pct and r.total >= snap.ng_alert_min and (r.ng_pct or 0) >= snap.ng_alert_pct:
                 alerts.append(f"{r.sensor_id}: NG {r.ng_pct:.1f}% this hour ({r.fail_count:,} of {r.total:,}) - "

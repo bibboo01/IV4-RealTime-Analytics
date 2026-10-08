@@ -320,3 +320,61 @@ def test_restart_does_not_start_if_stop_failed(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "cmd_start", lambda a, st: started.append(1) or 0)
     assert cli.COMMANDS["restart"]([], s) == 1
     assert started == []
+
+
+def _seed_tool_hours(settings, now, rows):
+    """rows: (hours_ago, count, ng, avg_value)"""
+    from datetime import timedelta
+
+    from sqlalchemy import text
+
+    from app.database.repository import DatabaseRepository
+    repo = DatabaseRepository(settings.database_path)
+    with repo.engine.begin() as c:
+        for ago, count, ng, avg in rows:
+            c.execute(text(
+                "INSERT INTO hourly_tool_stats (hour, program_no, sensor_id, tool_no, tool_name, count, ng_count,"
+                " value_sum, value_count, value_min, ok_value_min) VALUES (:h, 0, 'IV4-01', 2, 'AI Differentiate',"
+                " :n, :ng, :vs, :n, 10, 90)"),
+                {"h": (now - timedelta(hours=ago)).strftime("%Y-%m-%d %H"), "n": count, "ng": ng, "vs": avg * count})
+    repo.dispose()
+
+
+def test_drift_flags_score_drop_and_ng_jump_but_not_thin_data_or_when_off(settings, capsys):
+    from app import drift
+    from app.database.repository import DatabaseRepository
+    now = datetime.now()
+    base = [(h, 500, 5, 99.0) for h in range(3, 9)]                # ~3000 normal inspections: NG 1%, score 99
+    _seed_tool_hours(settings, now, base + [(0, 400, 40, 80.0), (1, 400, 40, 80.0)])   # now: score 80, NG 10%
+    repo = DatabaseRepository(settings.database_path)
+    try:
+        found = drift.find_drift(repo, now, 10.0, 200)
+        assert {d.kind for d in found} == {"score", "ng"}
+        assert "average score 80.0 vs normal 99.0" in next(d for d in found if d.kind == "score").describe()
+        assert drift.find_drift(repo, now, 0, 200) == []           # off
+        assert drift.find_drift(repo, now, 10.0, 5000) == []       # too few recent inspections
+    finally:
+        repo.dispose()
+    assert cli.COMMANDS["drift"]([], settings) == 0
+    assert "average score 80.0" in capsys.readouterr().out
+
+
+def test_drift_quiet_when_nothing_moved(settings, capsys):
+    _seed_tool_hours(settings, datetime.now(), [(h, 500, 5, 99.0) for h in range(0, 9)])
+    assert cli.COMMANDS["drift"]([], settings) == 0
+    assert "No drift" in capsys.readouterr().out
+
+
+def test_report_writes_html_for_a_day_and_handles_empty_and_bad_dates(settings, tmp_path, capsys):
+    from app import report
+    now = datetime.now()
+    _seed_today(settings, now)
+    out = tmp_path / "r.html"
+    day = now.strftime("%Y-%m-%d")
+    assert report.run([day, "--out", str(out)], settings) == 0
+    page = out.read_text(encoding="utf-8")
+    assert "Daily Report" in page and "IV4-02" in page and "AI Differentiate" in page and "1,990" in page
+    assert report.run(["2020-01-01", "--out", str(out)], settings) == 0
+    assert "No inspections recorded" in out.read_text(encoding="utf-8")
+    assert report.run(["not-a-date"], settings) == 2
+    assert cli.COMMANDS["report"](["-h"], settings) == 0

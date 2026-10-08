@@ -47,6 +47,7 @@ run
 | `IV4_RETENTION_OK_DAYS` / `IV4_RETENTION_NG_DAYS` | จำนวนวันที่เก็บรูป (0 = ไม่ลบเอง ระบบลบรูป OK เก่าสุดเองเมื่อดิสก์เหลือต่ำกว่า `IV4_MIN_FREE_GB`) ถ้าเปิด upload ไว้ ระบบจะรอให้โฟลเดอร์นั้นอัปโหลดเสร็จก่อนค่อยลบ (รอสูงสุดอีก 14 วัน) เช่น `OK=2`, `NG=30` |
 | `IV4_RESIZE_OK` / `IV4_RESIZE_QUALITY` | ย่อรูป OK (PASS) ตอนเก็บเข้า archive ให้พอดีกรอบที่กำหนด เช่น `640x480` ประหยัดดิสก์ ~3-4 เท่า รูป NG/UNKNOWN เก็บต้นฉบับ ระบบตรวจว่าไฟล์ใหม่เปิดได้ก่อนแทนที่ ถ้าผิดพลาดจะเก็บต้นฉบับไว้ ปิดเป็นค่าเริ่มต้น (ไม่ช่วยลดภาระ FTP จากเซ็นเซอร์ ต้องตั้งที่ตัว IV4) |
 | `IV4_NG_ALERT_PCT` / `IV4_NG_ALERT_MIN` | เตือนเมื่อ NG ชั่วโมงนี้ ≥ PCT % (ค่าเริ่มต้น 15) และตรวจแล้วอย่างน้อย MIN ชิ้น (ค่าเริ่มต้น 200) แสดงใน `run monitor` และส่ง Telegram ตั้ง PCT=0 เพื่อปิด |
+| `IV4_DRIFT_PCT` / `IV4_DRIFT_MIN` | เตือนเมื่อค่า score เฉลี่ยของ tool ใน 2 ชม.ล่าสุดเบี่ยงจากค่าปกติ 7 วันก่อนหน้า ≥ PCT % (ค่าเริ่มต้น 10) หรือ NG ของ tool นั้นพุ่งเกิน 2 เท่า ต้องมีข้อมูลล่าสุดอย่างน้อย MIN ชิ้น (ค่าเริ่มต้น 200) และข้อมูลย้อนหลังอย่างน้อย 2,000 ชิ้น ตั้ง PCT=0 เพื่อปิด ดูผลทันทีด้วย `run drift` |
 | `IV4_USE_POLLING` | `true` ถ้า `incoming` เป็น network share |
 | `IV4_UPLOAD_ENABLED` | `true` เมื่อต้องการอัปโหลดขึ้น Google Drive (ค่าเริ่มต้นปิด) |
 | `IV4_SHEETS_ENABLED` | `true` เมื่อต้องการ Google Sheets Dashboard (ค่าเริ่มต้นปิด) |
@@ -100,6 +101,7 @@ run production --passive 50000-50100      # ทำจริง (ใส่ช่�
 | `run version` | แสดงเลขเวอร์ชันของโปรแกรม (เช่น 1.0.0) เลขเดียวกันนี้ขึ้นที่หัว `run monitor`, บรรทัด Version ใน `run status`, แท็บ Status ใน Google Sheets และ `logs\health.json` รายการสิ่งที่เปลี่ยนในแต่ละเวอร์ชันอยู่ในไฟล์ `CHANGELOG.md` เลขเวอร์ชัน `x.y.z`: z เพิ่ม = แก้บั๊ก, y เพิ่ม = ฟีเจอร์ใหม่ (ข้อมูลและ `.env` เดิมใช้ต่อได้), x เพิ่ม = ต้องทำขั้นตอนเพิ่มด้วยมือ (จะบอกใน CHANGELOG) |
 | `run update <zip>` | **อัปเดตโปรแกรมโดยไม่ต้องใช้ git** ดาวน์โหลด ZIP จาก GitHub (Code > Download ZIP) แล้วสั่ง `run update C:\path\file.zip` จะแทนที่เฉพาะไฟล์โปรแกรม ไม่แตะ `.env`, `data`, `logs`, `credentials`, `backups` และสำรองโปรแกรมเก่าไว้ที่ `backups\code-วันที่.zip` (ต้อง `run stop` ก่อน; `--dry-run` ดูก่อนไม่เปลี่ยน) |
 | `run rollback` | ย้อนกลับเป็นเวอร์ชันก่อน `run update` (ใช้ไฟล์สำรองใน `backups\code-*.zip` ล่าสุด) ไม่แตะ `.env`, `data`, `logs`, `credentials` และสำรองเวอร์ชันปัจจุบันไว้ก่อน สั่งซ้ำ = ยกเลิกการย้อน ตัวเลือก: `--list` `--dry-run` หรือระบุไฟล์ zip (ต้อง `run stop` ก่อน แล้ว `run` ใหม่) |
+| `run report [วันที่]` | สร้างรายงานสรุปรายวันเป็นไฟล์ HTML หน้าเดียว (ยอดตรวจ yield NG% ไฟล์หาย แยกกล้อง แยกชั่วโมง tool ที่ NG มากสุด และข้อควรระวัง) บันทึกที่ `reports\report-วันที่.html` เปิดด้วยเบราว์เซอร์ หรือ Ctrl+P เพื่อบันทึกเป็น PDF ตัวเลือก: `--out ไฟล์.html` |
 | `run stop` |
 | รายงาน/ส่งออก Excel | `run metrics --by day --per-sensor --csv report.csv` |
 | Dashboard บน Google Sheets | `run sheets` (หรือเปิดลิงก์ที่ได้) |

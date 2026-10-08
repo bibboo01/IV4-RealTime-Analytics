@@ -121,6 +121,8 @@ class Settings:
     notify_cooldown_min: int = 60       # the same alert is repeated at most this often
     ng_alert_pct: float = 15.0          # alert when NG% of the current hour reaches this (0 = off)
     ng_alert_min: int = 200             # ...once the hour has at least this many inspections
+    drift_pct: float = 10.0             # alert when a tool's average score moves this % from its 7-day normal (0 = off)
+    drift_min: int = 200                # ...with at least this many recent inspections of that tool
     notify_missing_min: int = 10        # alert when at least this many files went missing this hour
 
     # Logging
@@ -282,6 +284,8 @@ def load_settings(
         notify_cooldown_min=max(_i("NOTIFY_COOLDOWN_MIN", "60"), 1),
         ng_alert_pct=max(_f("NG_ALERT_PCT", "15"), 0.0),
         ng_alert_min=max(_i("NG_ALERT_MIN", "200"), 1),
+        drift_pct=max(_f("DRIFT_PCT", "10"), 0.0),
+        drift_min=max(_i("DRIFT_MIN", "200"), 1),
         notify_missing_min=max(_i("NOTIFY_MISSING_MIN", "10"), 1),
         log_level=get("LOG_LEVEL", "INFO").upper(),
         log_max_bytes=_i("LOG_MAX_BYTES", "10485760"),
