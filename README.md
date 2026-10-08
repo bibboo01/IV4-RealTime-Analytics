@@ -99,6 +99,7 @@ run production --passive 50000-50100      # ทำจริง (ใส่ช่�
 | `run notify` | แจ้งเตือน Telegram ตามกะ: `run notify` ดูสถานะ, `test` ส่งทดสอบ, `chatid` หา chat id, `now` ดูสรุปกะปัจจุบัน (หัวข้อ 22.3) |
 | `run version` | แสดงเลขเวอร์ชันของโปรแกรม (เช่น 1.0.0) เลขเดียวกันนี้ขึ้นที่หัว `run monitor`, บรรทัด Version ใน `run status`, แท็บ Status ใน Google Sheets และ `logs\health.json` รายการสิ่งที่เปลี่ยนในแต่ละเวอร์ชันอยู่ในไฟล์ `CHANGELOG.md` เลขเวอร์ชัน `x.y.z`: z เพิ่ม = แก้บั๊ก, y เพิ่ม = ฟีเจอร์ใหม่ (ข้อมูลและ `.env` เดิมใช้ต่อได้), x เพิ่ม = ต้องทำขั้นตอนเพิ่มด้วยมือ (จะบอกใน CHANGELOG) |
 | `run update <zip>` | **อัปเดตโปรแกรมโดยไม่ต้องใช้ git** ดาวน์โหลด ZIP จาก GitHub (Code > Download ZIP) แล้วสั่ง `run update C:\path\file.zip` จะแทนที่เฉพาะไฟล์โปรแกรม ไม่แตะ `.env`, `data`, `logs`, `credentials`, `backups` และสำรองโปรแกรมเก่าไว้ที่ `backups\code-วันที่.zip` (ต้อง `run stop` ก่อน; `--dry-run` ดูก่อนไม่เปลี่ยน) |
+| `run rollback` | ย้อนกลับเป็นเวอร์ชันก่อน `run update` (ใช้ไฟล์สำรองใน `backups\code-*.zip` ล่าสุด) ไม่แตะ `.env`, `data`, `logs`, `credentials` และสำรองเวอร์ชันปัจจุบันไว้ก่อน สั่งซ้ำ = ยกเลิกการย้อน ตัวเลือก: `--list` `--dry-run` หรือระบุไฟล์ zip (ต้อง `run stop` ก่อน แล้ว `run` ใหม่) |
 | `run stop` |
 | รายงาน/ส่งออก Excel | `run metrics --by day --per-sensor --csv report.csv` |
 | Dashboard บน Google Sheets | `run sheets` (หรือเปิดลิงก์ที่ได้) |

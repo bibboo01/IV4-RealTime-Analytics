@@ -95,3 +95,28 @@ def test_update_shows_version_change(setup, capsys):
     out = capsys.readouterr().out
     assert "1.0.0 -> 1.1.0" in out and "Updated to version 1.1.0" in out
     assert (inst / "VERSION").read_text().strip() == "1.1.0"
+
+
+def test_rollback_restores_previous_version_and_can_be_undone(setup, capsys):
+    inst, zpath, s = setup
+    update.run([str(zpath)], s, lambda: None, base=inst)
+    assert (inst / "app" / "cli.py").read_text() == "v2"
+    assert update.rollback(["--dry-run"], s, lambda: None, base=inst) == 0
+    assert (inst / "app" / "cli.py").read_text() == "v2"
+    assert update.rollback([], s, lambda: "9", base=inst) == 1                   # agent running: refuse
+    assert update.rollback([], s, lambda: None, base=inst) == 0
+    assert (inst / "app" / "cli.py").read_text() == "v1" and (inst / "app" / "old_module.py").exists()
+    assert (inst / ".env").read_text() == "SECRET=1" and (inst / "data" / "iv4.db").read_text() == "db"
+    assert (inst / "credentials" / "token.json").read_text() == "tok"
+    assert update.rollback([], s, lambda: None, base=inst) == 0                  # again = undo
+    assert (inst / "app" / "cli.py").read_text() == "v2"
+    assert update.rollback(["--list"], s, lambda: None, base=inst) == 0
+    assert "code-" in capsys.readouterr().out
+
+
+def test_rollback_without_backups_or_with_bad_file(setup, tmp_path):
+    inst, zpath, s = setup
+    assert update.rollback([], s, lambda: None, base=inst) == 1
+    bad = tmp_path / "bad.zip"
+    bad.write_text("x")
+    assert update.rollback([str(bad)], s, lambda: None, base=inst) == 2

@@ -154,3 +154,93 @@ def run(args: list[str], s: Settings, running_pid, base: Path | None = None) -> 
     finally:
         if tmp:
             shutil.rmtree(tmp, ignore_errors=True)
+
+
+ROLLBACK_DOC = """run rollback - go back to the program version saved by the last `run update`.
+
+    run rollback               restore the newest backups/code-*.zip
+    run rollback --list        list the saved versions
+    run rollback <file.zip>    restore a specific backup
+    run rollback --dry-run     show what would change, change nothing
+
+Only program files change (same rules as `run update`); .env, data/, logs/, credentials/ are never touched.
+The current program is saved first, so running `run rollback` again undoes the rollback.
+The agent must be stopped (run stop)."""
+
+
+def _backups(base: Path) -> list[Path]:
+    return sorted((base / "backups").glob("code-*.zip"), key=lambda z: (z.stat().st_mtime_ns, z.name), reverse=True)
+
+
+def _zip_version(z: Path) -> str:
+    try:
+        with zipfile.ZipFile(z) as zf:
+            return zf.read("VERSION").decode().strip() or "?"
+    except (KeyError, OSError, zipfile.BadZipFile):
+        return "?"
+
+
+def rollback(args: list[str], s: Settings, running_pid, base: Path | None = None) -> int:
+    base = base or BASE_DIR
+    if "-h" in args or "--help" in args:
+        print(ROLLBACK_DOC)
+        return 0
+    dry = "--dry-run" in args
+    rest = [a for a in args if not a.startswith("--")]
+    found = _backups(base)
+    if "--list" in args:
+        if not found:
+            print("No saved versions yet (they are created by `run update`).")
+        for z in found:
+            print(f"  {z.name}   version {_zip_version(z)}")
+        return 0
+    if len(rest) > 1:
+        print(ROLLBACK_DOC)
+        return 2
+    if rest:
+        source = Path(rest[0]).expanduser()
+    elif found:
+        source = found[0]
+    else:
+        print("No saved versions in backups/ - nothing to roll back to.")
+        return 1
+    if not source.is_file() or not zipfile.is_zipfile(source):
+        print(f"Not a backup zip: {source}")
+        return 2
+    pid = running_pid()
+    if pid and not dry:
+        print(f"The agent is running (pid {pid}). Stop it first: run stop")
+        return 1
+
+    tmp = Path(tempfile.mkdtemp(prefix="iv4-rollback-"))
+    try:
+        with zipfile.ZipFile(source) as z:
+            z.extractall(tmp)
+        root = find_root(tmp)
+        if root is None:
+            print("This backup does not look like the IV4 Data Agent.")
+            return 2
+        from app.version import read_version
+        old_v, new_v = read_version(base), read_version(root)
+        p = plan(root, base)
+        total = len(p["new"]) + len(p["changed"]) + len(p["stale"])
+        print(f"Rollback to: {source.name}")
+        print(f"  version {old_v} -> {new_v}" if old_v != new_v else f"  version {new_v} (same)")
+        print(f"  restored {len(p['new']) + len(p['changed'])}   removed (not in that version) {len(p['stale'])}")
+        print("Kept untouched: .env, data/, logs/, credentials/, backups/, .venv/")
+        if not total:
+            print("Already the same as that backup.")
+            return 0
+        if dry:
+            print("(dry run - nothing changed)")
+            return 0
+        out = base / "backups" / f"code-{datetime.now():%Y%m%d-%H%M%S}.zip"
+        if out.exists() or out == source:
+            out = out.with_name(out.stem + "-b.zip")
+        saved = backup_code(base, out)
+        print(f"Current program saved to {saved.name} (run rollback again to undo this)")
+        apply(root, base, p)
+        print(f"Rolled back to version {new_v}. Start again with: run")
+        return 0
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
