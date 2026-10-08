@@ -4,6 +4,9 @@ Version number = `VERSION` file. Show it with `run version`; it also appears in 
 `run status`, the Google Sheets Status tab and `logs/health.json`.
 Rule: x.y.z - z = bug fix, y = new feature (data and settings stay compatible), x = needs manual steps.
 
+## 1.3.2 - 2026-10-08
+- Optional `IV4_ACTIVE_HOURS` (e.g. `9,14,21,2`) for a sensor that sends only in certain hours: Telegram's "no data" alert stays quiet outside them. Nothing else changes; the agent simply waits.
+
 ## 1.3.1 - 2026-10-08
 - `run metrics --all`: everything since the first recorded hour (combine with `--by day --csv file.csv` for Excel).
 
