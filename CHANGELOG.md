@@ -4,6 +4,9 @@ Version number = `VERSION` file. Show it with `run version`; it also appears in 
 `run status`, the Google Sheets Status tab and `logs/health.json`.
 Rule: x.y.z - z = bug fix, y = new feature (data and settings stay compatible), x = needs manual steps.
 
+## 1.3.1 - 2026-10-08
+- `run metrics --all`: everything since the first recorded hour (combine with `--by day --csv file.csv` for Excel).
+
 ## 1.3.0 - 2026-10-08
 - `run restart` (alias `run reboot`): stop the agent (forced after 60 s) and start it again, in one command. Uses the Windows task/service when `run production`/`run service install` set one up. It does not restart the PC.
 
