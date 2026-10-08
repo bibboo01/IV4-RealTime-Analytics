@@ -119,6 +119,19 @@ def test_alerts_are_one_combined_message_and_missing_needs_a_threshold(worker, r
     assert "ไฟล์หาย" not in msg                                       # only 2 missing: below IV4_NOTIFY_MISSING_MIN=10
 
 
+def test_ng_alert_needs_enough_inspections_and_a_high_share(worker, repo):
+    worker.s = __import__("dataclasses").replace(worker.s, ng_alert_pct=15.0, ng_alert_min=20)
+    for i in range(30):                                               # 30 inspections, 9 NG = 30%
+        save(repo, rec(200 + i, ts="2026-10-06 09:10:00", status="FAIL" if i < 9 else "PASS"))
+    worker.run_alerts(repo, dt("2026-10-06 09:30"))
+    assert len(worker.sent) == 1 and "NG" in worker.sent[0] and "30" in worker.sent[0]
+    worker.s = __import__("dataclasses").replace(worker.s, ng_alert_min=500)
+    worker.sent.clear()
+    worker.cool.clear()
+    worker.run_alerts(repo, dt("2026-10-06 09:31"))
+    assert not any("NG" in m for m in worker.sent)
+
+
 def test_missing_alert_when_enough_files_are_lost_and_only_new_ones_repeat(worker, repo):
     for i in range(0, 40, 4):                                         # 10 received of triggers 100..136 -> 27 missing
         save(repo, rec(100 + i, ts="2026-10-06 09:10:00"))

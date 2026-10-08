@@ -81,15 +81,21 @@ def save_manifest(manifest: dict, folder: Path, durable: bool = False) -> Path:
     default we skip it because recovery rebuilds a lost/corrupt manifest
     from the files themselves (rebuild_manifest) and the DB is the record.
     """
-    folder.mkdir(parents=True, exist_ok=True)
     target = folder / MANIFEST_NAME
     tmp = folder / (MANIFEST_NAME + ".tmp")
     manifest["updated_at"] = utc_now()
-    with tmp.open("w", encoding="utf-8") as fh:
-        json.dump(manifest, fh, indent=2, ensure_ascii=False)
-        if durable:
-            fh.flush()
-            os.fsync(fh.fileno())
+    for attempt in (1, 2):
+        try:
+            with tmp.open("w", encoding="utf-8") as fh:
+                json.dump(manifest, fh, indent=2, ensure_ascii=False)
+                if durable:
+                    fh.flush()
+                    os.fsync(fh.fileno())
+            break
+        except FileNotFoundError:
+            if attempt == 2:
+                raise
+            folder.mkdir(parents=True, exist_ok=True)       # normally the folder exists: no extra call
     os.replace(tmp, target)
     return target
 
