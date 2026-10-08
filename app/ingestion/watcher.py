@@ -100,6 +100,7 @@ class IV4Agent:
         self.pool = ThreadPoolExecutor(max_workers=settings.worker_count(), thread_name_prefix="iv4-worker")
         self._last_retry = 0.0
 
+        self._db_failed = False                 # set when a batch could not be saved (locked/full disk)
         self.timing: dict[str, float] = {}      # moving average, ms per file (see _tick)
         self.stats = {
             "version": read_version(),
@@ -179,8 +180,13 @@ class IV4Agent:
                     )
 
         bs = max(1, s.batch_size)
+        self._db_failed = False
         for i in range(0, len(ready), bs):
             if self.stop_event.is_set():
+                return
+            if self._db_failed:
+                # every further batch would wait for the same lock (30 s each): retry on the next pass
+                log.warning("[DB] skipping the remaining %d inspection(s) until the next pass", len(ready) - i)
                 return
             chunk = ready[i:i + bs]
             t1 = time.monotonic()
@@ -286,6 +292,7 @@ class IV4Agent:
                     save_manifest(p.manifest, p.folder)        # stays CLAIMED -> retried
                 else:
                     self._fail(p.folder, p.manifest, f"DATABASE: {exc}")
+            self._db_failed = True
             log.error("[DB RETRY] %d inspection(s) attempt=%d: %s", len(good), good[0].manifest["attempts"], exc)
             self._record_error(f"DATABASE: {exc}")
             return
@@ -368,7 +375,10 @@ class IV4Agent:
             elif status == DONE:
                 self._archive(folder, manifest)
         bs = max(1, s.batch_size)
+        self._db_failed = False
         for i in range(0, len(claimed), bs):
+            if self._db_failed:
+                break                           # database busy: try the rest at the next retry interval
             log.info("[RECOVER] %d inspection(s)", len(claimed[i:i + bs]))
             self._process_claimed(claimed[i:i + bs])
         return len(claimed)
