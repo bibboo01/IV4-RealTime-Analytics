@@ -5,6 +5,7 @@ IV4 Data Agent - one command for everything.
     run check               preflight checks only
     run clear               delete collected data to start from zero (agent must be stopped; asks first)
     run update <zip>        install a new version from a downloaded ZIP (no git; keeps .env, data, credentials)
+    run rollback            go back to the version saved before the last update (--list, --dry-run)
     run restart             stop the agent and start it again (also: run reboot; the PC itself is not restarted)
     run stop                stop the agent (also the Windows task/service, so it does not restart)
     run notify [test|chatid|now]   Telegram shift notifications: status / send a test / find chat id / preview
@@ -398,6 +399,11 @@ def cmd_update(args, s: Settings) -> int:
     return update.run(args, s, InstanceLock(s.log_dir).running_pid)
 
 
+def cmd_rollback(args, s: Settings) -> int:
+    from app import update
+    return update.rollback(args, s, InstanceLock(s.log_dir).running_pid)
+
+
 def cmd_version(_args, s: Settings) -> int:
     from app.version import read_version
     print(f"IV4 Data Agent {read_version()}")
@@ -493,6 +499,7 @@ COMMANDS = {
     "reboot": cmd_restart,
     "clear": cmd_clear,
     "update": cmd_update,
+    "rollback": cmd_rollback,
     "version": cmd_version,
     "notify": cmd_notify,
     "monitor": _monitor,

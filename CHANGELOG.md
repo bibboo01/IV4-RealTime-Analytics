@@ -4,6 +4,9 @@ Version number = `VERSION` file. Show it with `run version`; it also appears in 
 `run status`, the Google Sheets Status tab and `logs/health.json`.
 Rule: x.y.z - z = bug fix, y = new feature (data and settings stay compatible), x = needs manual steps.
 
+## 1.5.0 - 2026-10-08
+- `run rollback`: go back to the program version saved by the last `run update` (`--list` shows saved versions, `--dry-run` previews, or pass a specific `backups\code-*.zip`). Never touches `.env`, data, logs or credentials. The current program is saved first, so running it again undoes the rollback.
+
 ## 1.4.0 - 2026-10-08
 - Abnormal NG alert: when this hour's NG share reaches `IV4_NG_ALERT_PCT` (default 15) with at least `IV4_NG_ALERT_MIN` inspections (default 200), `run monitor` shows an alert and Telegram sends one (same cool-down as the other alerts). Set `IV4_NG_ALERT_PCT=0` to turn it off.
 - Fewer disk calls per inspection (less load on an HDD): mkdir 5 -> 1, stat 26 -> 16 (measured with strace). Folder layout, manifests, upload and recovery are unchanged.
