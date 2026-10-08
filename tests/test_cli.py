@@ -363,3 +363,18 @@ def test_drift_quiet_when_nothing_moved(settings, capsys):
     _seed_tool_hours(settings, datetime.now(), [(h, 500, 5, 99.0) for h in range(0, 9)])
     assert cli.COMMANDS["drift"]([], settings) == 0
     assert "No drift" in capsys.readouterr().out
+
+
+def test_report_writes_html_for_a_day_and_handles_empty_and_bad_dates(settings, tmp_path, capsys):
+    from app import report
+    now = datetime.now()
+    _seed_today(settings, now)
+    out = tmp_path / "r.html"
+    day = now.strftime("%Y-%m-%d")
+    assert report.run([day, "--out", str(out)], settings) == 0
+    page = out.read_text(encoding="utf-8")
+    assert "Daily Report" in page and "IV4-02" in page and "AI Differentiate" in page and "1,990" in page
+    assert report.run(["2020-01-01", "--out", str(out)], settings) == 0
+    assert "No inspections recorded" in out.read_text(encoding="utf-8")
+    assert report.run(["not-a-date"], settings) == 2
+    assert cli.COMMANDS["report"](["-h"], settings) == 0

@@ -5,6 +5,7 @@ IV4 Data Agent - one command for everything.
     run check               preflight checks only
     run clear               delete collected data to start from zero (agent must be stopped; asks first)
     run update <zip>        install a new version from a downloaded ZIP (no git; keeps .env, data, credentials)
+    run report [date]       one-page daily report as HTML (reports\\report-<date>.html), good for managers
     run drift               is any tool's score drifting from its last 7 days? (early warning before NG rises)
     run rollback            go back to the version saved before the last update (--list, --dry-run)
     run restart             stop the agent and start it again (also: run reboot; the PC itself is not restarted)
@@ -410,6 +411,11 @@ def cmd_drift(args, s: Settings) -> int:
     return drift.run(args, s)
 
 
+def cmd_report(args, s: Settings) -> int:
+    from app import report
+    return report.run(args, s)
+
+
 def cmd_version(_args, s: Settings) -> int:
     from app.version import read_version
     print(f"IV4 Data Agent {read_version()}")
@@ -507,6 +513,7 @@ COMMANDS = {
     "update": cmd_update,
     "rollback": cmd_rollback,
     "drift": cmd_drift,
+    "report": cmd_report,
     "version": cmd_version,
     "notify": cmd_notify,
     "monitor": _monitor,
