@@ -253,3 +253,14 @@ def test_counter_reset_in_one_hour_does_not_blank_the_day(repo):
     assert day.missing == 2 and day.unknown_hours == 1 and day.expected is None
     assert miss_text(day.missing, day.unknown_hours) == "2*"
     assert miss_text(None) == "-" and miss_text(0) == "0"
+
+
+def test_metrics_cli_all_starts_at_first_recorded_day(settings, repo, monkeypatch, capsys, tmp_path):
+    save(repo, rec(1))
+    monkeypatch.setattr("scripts.metrics.load_settings", lambda: settings)
+    out_csv = tmp_path / "all.csv"
+    monkeypatch.setattr("sys.argv", ["m", "--all", "--by", "day", "--csv", str(out_csv)])
+    from scripts.metrics import main
+    main()
+    out = capsys.readouterr().out
+    assert "Period 2026-10-03 .." in out and "2026-10-03" in out_csv.read_text(encoding="utf-8-sig")

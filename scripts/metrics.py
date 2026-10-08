@@ -4,6 +4,7 @@ Production metrics for reports / presentations.
     run metrics                   # today, per hour
     run metrics --from 2026-10-01 --to 2026-10-08 --by day
     run metrics --by day --csv report.csv   # open in Excel
+    run metrics --all --by day --csv all.csv    # everything since the first recorded hour
     run metrics --by day --per-sensor       # one row per sensor
 
 Times are sensor local time. --to is exclusive.
@@ -23,10 +24,20 @@ def _fmt(v, suffix=""):
     return "-" if v is None else f"{v:,}{suffix}" if isinstance(v, int) else f"{v:.2f}{suffix}"
 
 
+def first_day(repo: DatabaseRepository) -> str | None:
+    """'YYYY-MM-DD' of the earliest recorded hour (None if the database is empty)."""
+    from sqlalchemy import text
+
+    with repo.engine.connect() as conn:
+        hour = conn.execute(text("SELECT MIN(hour) FROM hourly_stats")).scalar()
+    return hour[:10] if hour else None
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--from", dest="start", default=date.today().isoformat())
     ap.add_argument("--to", dest="end", default=(date.today() + timedelta(days=1)).isoformat())
+    ap.add_argument("--all", action="store_true", help="from the first recorded hour until today")
     ap.add_argument("--by", choices=["hour", "day", "month"], default="hour")
     ap.add_argument("--program", type=int)
     ap.add_argument("--sensor", help="only this sensor (e.g. IV4-01)")
@@ -36,6 +47,11 @@ def main() -> None:
 
     repo = DatabaseRepository(load_settings().database_path)
     try:
+        if a.all:
+            first = first_day(repo)
+            if first:
+                a.start = first
+                a.end = (date.today() + timedelta(days=1)).isoformat()
         rows = summarize(repo, a.start, a.end, by=a.by, program_no=a.program,
                          sensor_id=a.sensor, per_sensor=a.per_sensor)
         tools = tool_summary(repo, a.start, a.end, program_no=a.program, sensor_id=a.sensor, per_sensor=True)
