@@ -289,3 +289,24 @@ def test_version_command_and_places(settings, capsys):
     assert cli._monitor(["--once", "--no-color"], settings) == 0
     assert f"IV4 Data Agent {shipped}" in capsys.readouterr().out
     assert f"## {shipped} " in (BASE_DIR / "CHANGELOG.md").read_text()          # changelog is kept in step
+
+
+def test_restart_stops_then_starts_again(tmp_path, capsys, monkeypatch):
+    s = load_settings(base_dir=tmp_path)
+    order = []
+    monkeypatch.setattr(cli, "cmd_stop", lambda a, st: order.append(("stop", list(a))) or 0)
+    monkeypatch.setattr(cli, "cmd_start", lambda a, st: order.append(("start", list(a))) or 0)
+    monkeypatch.setattr(cli, "_boot_entry_exists", lambda: None)
+    assert cli.COMMANDS["restart"]([], s) == 0
+    assert [o[0] for o in order] == ["stop", "start"]
+    assert "--force" in order[0][1] and "--force" not in order[1][1]
+    assert cli.COMMANDS["reboot"] is cli.COMMANDS["restart"]
+
+
+def test_restart_does_not_start_if_stop_failed(tmp_path, monkeypatch):
+    s = load_settings(base_dir=tmp_path)
+    started = []
+    monkeypatch.setattr(cli, "cmd_stop", lambda a, st: 1)
+    monkeypatch.setattr(cli, "cmd_start", lambda a, st: started.append(1) or 0)
+    assert cli.COMMANDS["restart"]([], s) == 1
+    assert started == []

@@ -5,6 +5,7 @@ IV4 Data Agent - one command for everything.
     run check               preflight checks only
     run clear               delete collected data to start from zero (agent must be stopped; asks first)
     run update <zip>        install a new version from a downloaded ZIP (no git; keeps .env, data, credentials)
+    run restart             stop the agent and start it again (also: run reboot; the PC itself is not restarted)
     run stop                stop the agent (also the Windows task/service, so it does not restart)
     run notify [test|chatid|now]   Telegram shift notifications: status / send a test / find chat id / preview
     run version             show the program version (see CHANGELOG.md)
@@ -356,6 +357,37 @@ def cmd_stop(args, s: Settings) -> int:
     return 0 if not lock.running_pid() else 1
 
 
+def _boot_entry_exists() -> str | None:
+    """Windows: 'task' / 'service' when `run production` / `run service install` set up a boot entry."""
+    if os.name != "nt":
+        return None
+    for kind, cmd in (("task", ["schtasks", "/query", "/tn", "IV4DataAgent"]),
+                      ("service", ["sc", "query", "IV4DataAgent"])):
+        try:
+            if subprocess.run(cmd, capture_output=True, timeout=30).returncode == 0:
+                return kind
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return None
+
+
+def cmd_restart(args, s: Settings) -> int:
+    """Stop the agent (force after 60 s) and start it again. Nothing is lost: files wait in incoming/."""
+    rc = cmd_stop([*args, "--force"], s)
+    if rc != 0:
+        print("Not restarting - the agent did not stop.")
+        return rc
+    kind = _boot_entry_exists()
+    if kind:                                   # let Windows run it in the background, as at boot
+        cmd = ["schtasks", "/run", "/tn", "IV4DataAgent"] if kind == "task" else ["sc", "start", "IV4DataAgent"]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        print(f"Started again (Windows {kind})." if r.returncode == 0
+              else f"Could not start the {kind}: {(r.stdout or r.stderr).strip()[:200]}\nStart it with: run")
+        return r.returncode
+    print("Starting again in this window...")
+    return cmd_start([a for a in args if a != "--force"], s)
+
+
 def cmd_clear(args, s: Settings) -> int:
     from app import clear
     return clear.run(args, s, InstanceLock(s.log_dir).running_pid)
@@ -457,6 +489,8 @@ COMMANDS = {
     "check": cmd_check,
     "status": cmd_status,
     "stop": cmd_stop,
+    "restart": cmd_restart,
+    "reboot": cmd_restart,
     "clear": cmd_clear,
     "update": cmd_update,
     "version": cmd_version,
