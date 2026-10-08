@@ -4,6 +4,9 @@ Version number = `VERSION` file. Show it with `run version`; it also appears in 
 `run status`, the Google Sheets Status tab and `logs/health.json`.
 Rule: x.y.z - z = bug fix, y = new feature (data and settings stay compatible), x = needs manual steps.
 
+## 1.5.1 - 2026-10-08
+- GitHub Actions (`.github/workflows/tests.yml`): the test suite runs on every push and pull request, on Windows and Linux with Python 3.11 and 3.12. No change to the program.
+
 ## 1.5.0 - 2026-10-08
 - `run rollback`: go back to the program version saved by the last `run update` (`--list` shows saved versions, `--dry-run` previews, or pass a specific `backups\code-*.zip`). Never touches `.env`, data, logs or credentials. The current program is saved first, so running it again undoes the rollback.
 
