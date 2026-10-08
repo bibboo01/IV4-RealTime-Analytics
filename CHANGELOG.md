@@ -4,6 +4,9 @@ Version number = `VERSION` file. Show it with `run version`; it also appears in 
 `run status`, the Google Sheets Status tab and `logs/health.json`.
 Rule: x.y.z - z = bug fix, y = new feature (data and settings stay compatible), x = needs manual steps.
 
+## 1.3.3 - 2026-10-08
+- Removed `IV4_ACTIVE_HOURS` (added in 1.3.2): not needed. If it is still in your `.env`, delete that line.
+
 ## 1.3.1 - 2026-10-08
 - `run metrics --all`: everything since the first recorded hour (combine with `--by day --csv file.csv` for Excel).
 
