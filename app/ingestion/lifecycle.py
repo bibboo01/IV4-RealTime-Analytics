@@ -4,6 +4,7 @@ File moves between incoming/ -> processing/<uid>/ -> error/<uid>/.
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 from pathlib import Path
 
@@ -12,14 +13,24 @@ from app.ingestion.record import utc_now
 log = logging.getLogger(__name__)
 
 
-def move_files(files: list[Path], destination: Path) -> list[Path]:
-    destination.mkdir(parents=True, exist_ok=True)
+def rename_or_move(src: Path, dst: Path) -> None:
+    """Same-disk rename (one cheap call); falls back to shutil.move across disks / when dst needs care."""
+    try:
+        os.rename(src, dst)
+    except OSError:
+        shutil.move(str(src), str(dst))
+
+
+def move_files(files: list[Path], destination: Path, make_dir: bool = True) -> list[Path]:
+    if make_dir:
+        destination.mkdir(parents=True, exist_ok=True)
     moved: list[Path] = []
     for file_path in files:
-        if not file_path.exists():
-            continue
         target = destination / file_path.name
-        shutil.move(str(file_path), str(target))
+        try:
+            rename_or_move(file_path, target)
+        except FileNotFoundError:
+            continue                    # vanished meanwhile (same as the old exists() check)
         moved.append(target)
     return moved
 

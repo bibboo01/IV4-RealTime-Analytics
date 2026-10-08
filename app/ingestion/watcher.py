@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 import signal
 import threading
@@ -31,7 +32,7 @@ from watchdog.observers.polling import PollingObserver
 
 from app.config import Settings, load_settings
 from app.database.repository import DatabaseRepository
-from app.ingestion.lifecycle import move_files, quarantine, unique_dir
+from app.ingestion.lifecycle import move_files, quarantine, rename_or_move, unique_dir
 from app.ingestion.matcher import (
     COMPLETE,
     INVALID,
@@ -216,8 +217,9 @@ class IV4Agent:
         moved: list[Path] = []
         try:
             sha = content_hash(status.files, status.sensor_id)
+            folder.mkdir(parents=True, exist_ok=True)
             for f in status.files:
-                moved += move_files([f], folder)
+                moved += move_files([f], folder, make_dir=False)
         except OSError as exc:
             # e.g. IV4 still has the file open on Windows -> roll back, retry next scan
             log.warning("[CLAIM] group=%s not movable yet: %s", group_id, exc)
@@ -346,12 +348,17 @@ class IV4Agent:
             self.repo.set_folder(manifest["uid"], rel)
         target = self.settings.archive_dir / rel
         try:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            if target.exists():
-                target = unique_dir(target.parent, target.name)
-                rel = str(target.relative_to(self.settings.archive_dir)).replace("\\", "/")
-                self.repo.set_folder(manifest["uid"], rel)
-            shutil.move(str(folder), str(target))
+            try:
+                os.rename(folder, target)                # normal case: the hour folder exists, uid is new
+            except FileNotFoundError:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                os.rename(folder, target)
+            except OSError:
+                if target.exists():                      # same uid already archived: keep both
+                    target = unique_dir(target.parent, target.name)
+                    rel = str(target.relative_to(self.settings.archive_dir)).replace("\\", "/")
+                    self.repo.set_folder(manifest["uid"], rel)
+                shutil.move(str(folder), str(target))    # other disk, or the rename failed: copy+delete
         except OSError as exc:
             log.warning("[ARCHIVE] uid=%s will retry: %s", manifest.get("uid"), exc)
 

@@ -84,6 +84,8 @@ class Snapshot:
     chart_hours: int = 8
     live_hours: int = 3
     live: dict = field(default_factory=dict)    # 'YYYY-MM-DD HH' -> {minute: (total, ng)}
+    ng_alert_pct: float = 0.0               # alert when this hour's NG% reaches it (0 = off)
+    ng_alert_min: int = 200
 
 
 def _read_health(s: Settings) -> dict | None:
@@ -132,7 +134,8 @@ def live_minutes(repo, now: datetime, hours: int) -> dict:
 def collect(repo, s: Settings, hours: int, pid: str | None, now: datetime | None = None,
             live_hours: int = 3) -> Snapshot:
     now = now or datetime.now()
-    snap = Snapshot(now=now, pid=pid, health=_read_health(s), chart_hours=hours, live_hours=live_hours)
+    snap = Snapshot(now=now, pid=pid, health=_read_health(s), chart_hours=hours, live_hours=live_hours,
+                    ng_alert_pct=s.ng_alert_pct, ng_alert_min=s.ng_alert_min)
     today = now.strftime("%Y-%m-%d")
     tomorrow = (now + timedelta(days=1)).strftime("%Y-%m-%d")
     cur_hour = now.strftime("%Y-%m-%d %H")
@@ -332,6 +335,9 @@ def render(snap: Snapshot, st: Style, width: int = 80, interval: float | None = 
             add(st.dim("  Missing: '*' = plus hours where the sensor counter restarted (not measurable); "
                        "'-' = no measurable hour yet"))
         for r in snap.this_hour:
+            if snap.ng_alert_pct and r.total >= snap.ng_alert_min and (r.ng_pct or 0) >= snap.ng_alert_pct:
+                alerts.append(f"{r.sensor_id}: NG {r.ng_pct:.1f}% this hour ({r.fail_count:,} of {r.total:,}) - "
+                              f"above {snap.ng_alert_pct:g}%: check the line (lot, light, lens)")
             if r.missing:
                 alerts.append(f"{r.sensor_id}: {r.missing:,} inspections missing this hour (sensor counted, file "
                               "never arrived) - check FTP")

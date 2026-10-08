@@ -148,6 +148,16 @@ def _seed_today(settings, now):
     repo.dispose()
 
 
+def test_monitor_alerts_when_ng_share_is_abnormal(settings, capsys):
+    import dataclasses
+    _seed_today(settings, datetime.now())                          # IV4-01 2.0% NG, IV4-02 5.1% NG
+    cli._monitor(["--once", "--no-color"], dataclasses.replace(settings, ng_alert_pct=4.0, ng_alert_min=100))
+    out = capsys.readouterr().out
+    assert "IV4-02: NG 5.1% this hour" in out and "IV4-01: NG" not in out
+    cli._monitor(["--once", "--no-color"], dataclasses.replace(settings, ng_alert_pct=4.0, ng_alert_min=5000))
+    assert "NG 5.1% this hour" not in capsys.readouterr().out      # too few inspections: no alert
+
+
 def test_monitor_once_empty_and_stopped(settings, capsys):
     assert cli._monitor(["--once", "--no-color"], settings) == 0
     out = capsys.readouterr().out

@@ -370,6 +370,12 @@ class NotifyWorker(threading.Thread):
             found.append(("missing", f"ชั่วโมงนี้ไฟล์หาย {miss:,} ชุด (sensor นับแล้วแต่ไฟล์ไม่มา) "
                                      "เช็ก FTP / trigger interval"))
             self._miss_now = miss
+        if s.ng_alert_pct:
+            for r in summarize(repo, hour, _hour(now + timedelta(hours=1)), by="hour", per_sensor=True):
+                if r.total >= s.ng_alert_min and (r.ng_pct or 0) >= s.ng_alert_pct:
+                    found.append(("ng", f"ชั่วโมงนี้ NG {r.ng_pct:.1f}% ({r.fail_count:,} จาก {r.total:,}) "
+                                        f"เกินเกณฑ์ {s.ng_alert_pct:g}% ตรวจสอบหน้างาน (ล็อต แสง เลนส์)"))
+                    break
         waiting = h.get("incoming_files", 0)
         if waiting > s.notify_backlog:
             found.append(("backlog", f"มีไฟล์ค้างรอประมวลผล {waiting:,} ไฟล์ agent ตามไม่ทัน"))
