@@ -376,6 +376,11 @@ class NotifyWorker(threading.Thread):
                     found.append(("ng", f"ชั่วโมงนี้ NG {r.ng_pct:.1f}% ({r.fail_count:,} จาก {r.total:,}) "
                                         f"เกินเกณฑ์ {s.ng_alert_pct:g}% ตรวจสอบหน้างาน (ล็อต แสง เลนส์)"))
                     break
+        from app.drift import find_drift
+        drifts = find_drift(repo, now, s.drift_pct, s.drift_min)
+        if drifts:
+            found.append(("drift", "ค่า score เบี่ยงจากปกติ (7 วันที่ผ่านมา) ตรวจเลนส์ แสง ล็อตวัตถุดิบ:\n  "
+                                   + "\n  ".join(d.describe() for d in drifts[:3])))
         waiting = h.get("incoming_files", 0)
         if waiting > s.notify_backlog:
             found.append(("backlog", f"มีไฟล์ค้างรอประมวลผล {waiting:,} ไฟล์ agent ตามไม่ทัน"))

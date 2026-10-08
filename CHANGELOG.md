@@ -4,6 +4,9 @@ Version number = `VERSION` file. Show it with `run version`; it also appears in 
 `run status`, the Google Sheets Status tab and `logs/health.json`.
 Rule: x.y.z - z = bug fix, y = new feature (data and settings stay compatible), x = needs manual steps.
 
+## 1.6.0 - 2026-10-08
+- Drift check (early warning): compares each tool's average score and NG rate over the last 2 hours with the previous 7 days, per sensor and program. Shown as an alert in `run monitor`, sent to Telegram, and available on demand with `run drift`. Needs 2,000+ past and `IV4_DRIFT_MIN` (default 200) recent inspections of that tool. `IV4_DRIFT_PCT` (default 10) = % the average score may move before alerting; 0 = off.
+
 ## 1.5.1 - 2026-10-08
 - GitHub Actions (`.github/workflows/tests.yml`): the test suite runs on every push and pull request, on Windows and Linux with Python 3.11 and 3.12. No change to the program.
 
