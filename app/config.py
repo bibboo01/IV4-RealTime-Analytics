@@ -68,7 +68,6 @@ class Settings:
     group_timeout: float = 120.0        # incomplete group -> error after this
     expected_images: int = 1
     expected_texts: int = 1             # real IV4: 1 image + 1 result TXT
-    active_hours: frozenset[int] | None = None   # hours (0-23) when the sensor is meant to send; None = all day
     resize_ok: tuple[int, int] | None = None   # shrink OK (PASS) images to fit WxH when archived; NG keep the original
     resize_quality: int = 85
     verify_images: bool = True          # open JPG with Pillow to catch truncation
@@ -168,19 +167,6 @@ class Settings:
         return out
 
 
-def _hours(value: str) -> frozenset[int] | None:
-    """'9,14,21,2' -> {9, 14, 21, 2}; empty -> None (all day)."""
-    if not value.strip():
-        return None
-    try:
-        hours = frozenset(int(x) for x in value.replace(";", ",").split(",") if x.strip())
-        if not hours or any(h < 0 or h > 23 for h in hours):
-            raise ValueError
-        return hours
-    except ValueError:
-        raise ConfigError(f"IV4_ACTIVE_HOURS={value!r} must be hours 0-23 like 9,14,21,2 (or empty = all day)") from None
-
-
 def _size(value: str) -> tuple[int, int] | None:
     """'640x480' -> (640, 480); empty/off -> None."""
     v = value.strip().lower()
@@ -251,7 +237,6 @@ def load_settings(
         group_timeout=_f("GROUP_TIMEOUT", "120"),
         expected_images=_i("EXPECTED_IMAGES", "1"),
         expected_texts=_i("EXPECTED_TEXTS", "1"),
-        active_hours=_hours(get("ACTIVE_HOURS", "")),
         resize_ok=_size(get("RESIZE_OK", "")),
         resize_quality=min(max(_i("RESIZE_QUALITY", "85"), 30), 100),
         verify_images=get("VERIFY_IMAGES", "true").lower() in {"1", "true", "yes"},

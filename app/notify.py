@@ -350,9 +350,7 @@ class NotifyWorker(threading.Thread):
         found: list[tuple[str, str]] = []
         cur = current(now, self.shifts)
         shift, start, _ = cur
-        if s.active_hours is not None and now.hour not in s.active_hours:
-            pass                                # the sensor is not supposed to send now: silence is normal
-        elif now - start >= timedelta(minutes=s.notify_no_data_min):
+        if now - start >= timedelta(minutes=s.notify_no_data_min):
             with repo.engine.connect() as c:
                 last = c.execute(text("SELECT MAX(created_at) FROM inspection")).scalar()
             if last:

@@ -108,20 +108,6 @@ def test_no_data_alert_only_while_working_with_cooldown(worker, repo):
     assert worker.sent == []
 
 
-def test_no_data_alert_is_silent_outside_active_hours(worker, repo):
-    save(repo, rec(1, ts="2026-10-06 09:10:00"))
-    with repo.engine.begin() as c:
-        from sqlalchemy import text
-        c.execute(text("UPDATE inspection SET created_at = :t"),
-                  {"t": datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=30)})
-    worker.s.active_hours = frozenset({14, 21})                       # the sensor only sends at 14:00 and 21:00
-    worker.run_alerts(repo, dt("2026-10-06 09:30"))
-    assert not any("ไม่มีไฟล์เข้ามา" in m for m in worker.sent)
-    worker.s.active_hours = frozenset({9})
-    worker.run_alerts(repo, dt("2026-10-06 09:30"))
-    assert any("ไม่มีไฟล์เข้ามา" in m for m in worker.sent)
-
-
 def test_alerts_are_one_combined_message_and_missing_needs_a_threshold(worker, repo):
     for i in [0, 1, 2, 5]:                                            # triggers 100..105, 4 received -> 2 missing
         save(repo, rec(100 + i, ts="2026-10-06 09:10:00"))
