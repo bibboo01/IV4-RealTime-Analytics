@@ -476,9 +476,17 @@ class IV4Agent:
         log.info("Sheets     : %s", f"every {s.sheets_interval:.0f}s" if s.sheets_enabled else "disabled")
         log.info("=" * 60)
 
+        from app import boot
+        prev_health = None
+        try:
+            prev_health = json.loads((s.log_dir / "health.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            pass
+        marker = boot.take_marker(s)
         n = self.recover_processing()
         if n:
             log.info("[RECOVER] %d inspection(s) re-processed", n)
+        boot.record_start(s, prev_health, marker, n, log)
 
         observer = self._start_observer()
 
@@ -537,6 +545,7 @@ class IV4Agent:
             self.write_health()
             self.pool.shutdown(wait=True)
             self.repo.dispose()
+            boot.write_clean_stop(s)
             log.info("IV4 Data Agent stopped")
 
     def _start_observer(self):
