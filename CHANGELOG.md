@@ -4,6 +4,9 @@ Version number = `VERSION` file. Show it with `run version`; it also appears in 
 `run status`, the Google Sheets Status tab and `logs/health.json`.
 Rule: x.y.z - z = bug fix, y = new feature (data and settings stay compatible), x = needs manual steps.
 
+## 1.11.4 - 2026-10-09
+- Slowdowns now leave evidence: when processing drops below ~4 files/s the agent writes a `[SLOW]` line to `logs\agent.log` (at most every 5 minutes) with the milliseconds per stage and the number of files waiting. The monitor alert now names the slowest step (e.g. `slowest step: db 480 ms/file`).
+
 ## 1.11.3 - 2026-10-09
 - The automatic database check after an abnormal stop is skipped when the database is larger than 1 GB (reading it whole competes with production for an HDD). Run `run doctor-boot` when the line is idle instead.
 

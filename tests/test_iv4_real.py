@@ -279,3 +279,20 @@ def test_locked_db_does_not_stall_every_batch(tmp_path, clock, monkeypatch):
         assert repo.count() == 5
     finally:
         repo.dispose()
+
+
+def test_slow_processing_leaves_a_log_line_with_the_slow_step(tmp_path, caplog):
+    import logging
+    from app.config import load_settings
+    from app.ingestion.watcher import IV4Agent
+    s = load_settings(base_dir=tmp_path)
+    agent = IV4Agent(s)
+    try:
+        agent.timing.update({"scan": 5.0, "claim": 20.0, "parse": 3.0, "db": 480.0, "archive": 30.0})
+        with caplog.at_level(logging.WARNING):
+            agent.write_health()
+            agent.write_health()                      # second call inside 5 min: no second line
+        slow = [r.message for r in caplog.records if "[SLOW]" in r.message]
+        assert len(slow) == 1 and "db 480" in slow[0]
+    finally:
+        agent.repo.dispose()

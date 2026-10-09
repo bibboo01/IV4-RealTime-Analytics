@@ -64,6 +64,8 @@ STOP_FLAG = "stop.flag"        # created in log_dir by `run stop`
 
 DB_RETRY_INTERVAL = 30.0
 DB_MAX_ATTEMPTS = 20
+SLOW_MS_PER_FILE = 250                 # below ~4 files/s the PC cannot keep up with a 300 ms trigger
+SLOW_LOG_EVERY = 300                   # seconds between [SLOW] log lines
 MAX_GROUPS_PER_SCAN = 600      # bounded work per pass; the rest is picked up by the next pass
 MIN_SCAN_GAP = 0.2             # seconds between passes (file events arrive in bursts)
 
@@ -104,6 +106,7 @@ class IV4Agent:
         self.pool = ThreadPoolExecutor(max_workers=settings.worker_count(), thread_name_prefix="iv4-worker")
         self._last_retry = 0.0
 
+        self._last_slow_log = -1e9
         self._db_failed = False                 # set when a batch could not be saved (locked/full disk)
         self.timing: dict[str, float] = {}      # moving average, ms per file (see _tick)
         self.stats = {
@@ -414,6 +417,10 @@ class IV4Agent:
         t = {k: round(v, 1) for k, v in self.timing.items()}
         # wall-clock per inspection across stages -> how many files/s this PC can sustain
         per_file = sum(t.get(k, 0.0) for k in ("scan", "claim", "parse", "db", "archive"))
+        if per_file > SLOW_MS_PER_FILE and time.monotonic() - self._last_slow_log > SLOW_LOG_EVERY:
+            self._last_slow_log = time.monotonic()      # leave evidence in the log: the screen may not be watched
+            log.warning("[SLOW] %.0f ms/file (~%.1f files/s): %s | incoming waiting %d", per_file, 1000.0 / per_file,
+                        ", ".join(f"{k} {v:.0f}" for k, v in t.items()), pending)
         health = {
             **self.stats,
             "timing_ms": t,
