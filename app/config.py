@@ -122,6 +122,7 @@ class Settings:
     ng_alert_pct: float = 15.0          # alert when NG% of the current hour reaches this (0 = off)
     ng_alert_min: int = 200             # ...once the hour has at least this many inspections
     drift_pct: float = 10.0             # alert when a tool's average score moves this % from its 7-day normal (0 = off)
+    heal_stale_sec: int = 180           # run heal restarts an agent whose heartbeat is older than this
     drift_min: int = 200                # ...with at least this many recent inspections of that tool
     notify_missing_min: int = 10        # alert when at least this many files went missing this hour
 
@@ -286,6 +287,7 @@ def load_settings(
         ng_alert_min=max(_i("NG_ALERT_MIN", "200"), 1),
         drift_pct=max(_f("DRIFT_PCT", "10"), 0.0),
         drift_min=max(_i("DRIFT_MIN", "200"), 1),
+        heal_stale_sec=max(_i("HEAL_STALE_SEC", "180"), 60),
         notify_missing_min=max(_i("NOTIFY_MISSING_MIN", "10"), 1),
         log_level=get("LOG_LEVEL", "INFO").upper(),
         log_max_bytes=_i("LOG_MAX_BYTES", "10485760"),

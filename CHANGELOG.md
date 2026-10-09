@@ -4,6 +4,9 @@ Version number = `VERSION` file. Show it with `run version`; it also appears in 
 `run status`, the Google Sheets Status tab and `logs/health.json`.
 Rule: x.y.z - z = bug fix, y = new feature (data and settings stay compatible), x = needs manual steps.
 
+## 1.8.0 - 2026-10-09
+- Self-healing: `run heal` restarts the agent when it is alive but stuck (heartbeat older than `IV4_HEAL_STALE_SEC`, default 180 s, and the agent has been up longer than that). The 5-minute health-check task now calls it, so a hang fixes itself without anyone watching - `run update` is enough, no reinstall of the tasks. Limits: 3 restarts per hour (then it leaves the problem visible), never starts an agent you stopped with `run stop`. Decisions are logged to `logs\heal.log`; `run heal --dry-run` shows what it would do.
+
 ## 1.7.0 - 2026-10-08
 - `run report [YYYY-MM-DD]`: one-page daily report as HTML (inspections, yield, NG %, missing files, per sensor, per hour with a bar, worst tools, attention notes). Saved to `reports\report-<date>.html`; open in a browser or Ctrl+P to save as PDF. `--out file.html` chooses the path.
 

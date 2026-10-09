@@ -40,6 +40,12 @@ if (Test-Path $errorDir) {
     if ($recent.Count -gt 0) { $problems += "$($recent.Count) inspection(s) moved to data\error in the last 15 min" }
 }
 
+# Self-healing: an agent that is alive but stuck (heartbeat stops) is restarted by `run heal`
+# (limits: 3 restarts/hour, never starts an agent that was stopped on purpose; log: logs\heal.log)
+if ($problems | Where-Object { $_ -like "heartbeat is*" }) {
+    try { $heal = & (Join-Path $ProjectDir "run.bat") heal 2>&1 | Out-String; $problems += "self-heal: " + $heal.Trim() } catch {}
+}
+
 if ($problems.Count -gt 0) {
     $msg = "IV4 Data Agent UNHEALTHY: " + ($problems -join "; ")
     if (-not [System.Diagnostics.EventLog]::SourceExists("IV4DataAgent")) {

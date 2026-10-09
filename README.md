@@ -102,6 +102,7 @@ run production --passive 50000-50100      # ทำจริง (ใส่ช่�
 | `run update <zip>` | **อัปเดตโปรแกรมโดยไม่ต้องใช้ git** ดาวน์โหลด ZIP จาก GitHub (Code > Download ZIP) แล้วสั่ง `run update C:\path\file.zip` จะแทนที่เฉพาะไฟล์โปรแกรม ไม่แตะ `.env`, `data`, `logs`, `credentials`, `backups` และสำรองโปรแกรมเก่าไว้ที่ `backups\code-วันที่.zip` (ต้อง `run stop` ก่อน; `--dry-run` ดูก่อนไม่เปลี่ยน) |
 | `run rollback` | ย้อนกลับเป็นเวอร์ชันก่อน `run update` (ใช้ไฟล์สำรองใน `backups\code-*.zip` ล่าสุด) ไม่แตะ `.env`, `data`, `logs`, `credentials` และสำรองเวอร์ชันปัจจุบันไว้ก่อน สั่งซ้ำ = ยกเลิกการย้อน ตัวเลือก: `--list` `--dry-run` หรือระบุไฟล์ zip (ต้อง `run stop` ก่อน แล้ว `run` ใหม่) |
 | `run report [วันที่]` | สร้างรายงานสรุปรายวันเป็นไฟล์ HTML หน้าเดียว (ยอดตรวจ yield NG% ไฟล์หาย แยกกล้อง แยกชั่วโมง tool ที่ NG มากสุด และข้อควรระวัง) บันทึกที่ `reports\report-วันที่.html` เปิดด้วยเบราว์เซอร์ หรือ Ctrl+P เพื่อบันทึกเป็น PDF ตัวเลือก: `--out ไฟล์.html` |
+| `run heal` | รีสตาร์ท agent อัตโนมัติเมื่อโปรแกรมยังรันอยู่แต่ค้าง (heartbeat เก่ากว่า `IV4_HEAL_STALE_SEC` ค่าเริ่มต้น 180 วินาที) งาน health-check ทุก 5 นาทีเรียกคำสั่งนี้ให้เอง จึงไม่ต้องติดตั้งใหม่ แค่ `run update` จำกัด 3 ครั้งต่อชั่วโมง ไม่สตาร์ทตัวที่คุณสั่ง `run stop` ไว้ บันทึกที่ `logs\heal.log` ตัวเลือก `--dry-run` |
 | `run stop` |
 | รายงาน/ส่งออก Excel | `run metrics --by day --per-sensor --csv report.csv` |
 | Dashboard บน Google Sheets | `run sheets` (หรือเปิดลิงก์ที่ได้) |
