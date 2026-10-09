@@ -4,6 +4,9 @@ Version number = `VERSION` file. Show it with `run version`; it also appears in 
 `run status`, the Google Sheets Status tab and `logs/health.json`.
 Rule: x.y.z - z = bug fix, y = new feature (data and settings stay compatible), x = needs manual steps.
 
+## 1.11.2 - 2026-10-09
+- `run drift` now always prints a table: for every tool the last-2-hours score and NG next to the 7-day normal, and `ok` / `DRIFT` / why it cannot be compared yet (not enough recent or past inspections). Before, a quiet result and a missing baseline looked the same.
+
 ## 1.11.1 - 2026-10-09
 - Drift check: a tool's NG rate now counts as drifting when it doubles and rises by at least 1 point (was 3 points, too coarse for a line that normally runs at ~0.5% NG).
 
