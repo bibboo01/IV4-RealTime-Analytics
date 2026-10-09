@@ -53,6 +53,6 @@ def run(args: list[str], s, _running_pid=None) -> int:
         cur = json.loads(js)
         diff = "" if prev is None else "  changed: " + (", ".join(
             f"{k}={cur.get(k)!r}" for k in sorted(cur) if prev.get(k) != cur.get(k)) or "(none)")
-        print(f"{seen:%Y-%m-%d %H:%M}  v{ver}  config {h}  {n:,} inspections{diff}")
+        print(f"{str(seen)[:16]}  v{ver}  config {h}  {n:,} inspections{diff}")
         prev = cur
     return 0
