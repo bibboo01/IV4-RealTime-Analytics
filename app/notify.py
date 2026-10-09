@@ -25,7 +25,7 @@ import threading
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 
 from sqlalchemy import text
@@ -395,6 +395,20 @@ class NotifyWorker(threading.Thread):
             found.append(("sheets", f"อัปเดต Google Sheets ผิดพลาด: {sh['last_error'][:150]}"))
         return found
 
+    def announce_boot(self) -> None:
+        """Once per start: tell the group the PC came back after a power cut / long stop."""
+        from app import boot
+        path = self.s.log_dir / "last_boot.json"
+        rep = boot._load(path)
+        if not rep or rep.get("notified"):
+            return
+        if rep.get("clean") is False and rep.get("db_check") is None and rep.get("downtime_min", 0) >= 0:
+            if (datetime.now(timezone.utc) - boot._t(rep["at"])).total_seconds() < 60:
+                return                            # wait for the database check to finish
+        if self._post(boot.message(rep)):
+            rep["notified"] = True
+            path.write_text(json.dumps(rep, indent=2), encoding="utf-8")
+
     def run_alerts(self, repo, now: datetime) -> None:
         """One message for everything new; the same alert is repeated at most every cool-down."""
         cur = current(now, self.shifts)
@@ -415,6 +429,7 @@ class NotifyWorker(threading.Thread):
     # loop ----------------------------------------------------------
     def tick(self, repo, now: datetime | None = None) -> None:
         now = now or self._now()
+        self.announce_boot()
         self.run_events(repo, now)
         self.run_alerts(repo, now)
 

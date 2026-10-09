@@ -7,6 +7,7 @@ IV4 Data Agent - one command for everything.
     run update <zip>        install a new version from a downloaded ZIP (no git; keeps .env, data, credentials)
     run update <zip> --restart   safe update: stop, update, self-test, start, watch; goes back by itself if it fails
     run export-dataset <folder>   copy NG + OK images into a versioned, labelled training set (labels.csv, dataset.json)
+    run doctor-boot         what happened at the last start (power cut? downtime, recovered files) + database check
     run lineage             which program version + settings produced the results (history of changes)
     run heal                restart the agent if it is alive but stuck (the health-check task runs this; --dry-run)
     run report [date]       one-page daily report as HTML (reports\\report-<date>.html), good for managers
@@ -449,6 +450,11 @@ def cmd_export_dataset(args, s: Settings) -> int:
     return dataset.run(args, s)
 
 
+def cmd_doctor_boot(args, s: Settings) -> int:
+    from app import boot
+    return boot.run(args, s)
+
+
 def cmd_version(_args, s: Settings) -> int:
     from app.version import read_version
     print(f"IV4 Data Agent {read_version()}")
@@ -550,6 +556,7 @@ COMMANDS = {
     "heal": cmd_heal,
     "lineage": cmd_lineage,
     "export-dataset": cmd_export_dataset,
+    "doctor-boot": cmd_doctor_boot,
     "version": cmd_version,
     "notify": cmd_notify,
     "monitor": _monitor,

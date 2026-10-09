@@ -4,6 +4,10 @@ Version number = `VERSION` file. Show it with `run version`; it also appears in 
 `run status`, the Google Sheets Status tab and `logs/health.json`.
 Rule: x.y.z - z = bug fix, y = new feature (data and settings stay compatible), x = needs manual steps.
 
+## 1.11.0 - 2026-10-09
+- Start-up self-check after a power cut or crash: the agent writes a marker on a normal stop; at the next start it tells whether the stop was normal or not, how long it was down, how many half-processed files it recovered, and (after an abnormal stop) runs a database integrity check in the background. Saved to `logs\last_boot.json` and the log. Telegram announces an abnormal stop once (a normal restart under 5 minutes stays silent).
+- `run doctor-boot`: shows what happened at the last start and checks the database now (`--full` = deeper, slower).
+
 ## 1.10.0 - 2026-10-09
 - Safe update: `run update <zip> --restart` stops the agent, saves the old program, installs the new one, installs new requirements if `requirements.txt` changed, self-tests the new code in a fresh process (every module imports, settings load), starts the agent and watches it for up to 2 minutes (fresh heartbeat with the new version). If any step fails it restores the old version by itself and starts it again; `.env`, data and credentials are never touched. Without `--restart`, `run update` behaves as before.
 
