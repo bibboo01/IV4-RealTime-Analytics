@@ -378,3 +378,16 @@ def test_report_writes_html_for_a_day_and_handles_empty_and_bad_dates(settings, 
     assert "No inspections recorded" in out.read_text(encoding="utf-8")
     assert report.run(["not-a-date"], settings) == 2
     assert cli.COMMANDS["report"](["-h"], settings) == 0
+
+
+def test_drift_ng_jump_is_caught_on_a_low_ng_line(settings):
+    from app import drift
+    from app.database.repository import DatabaseRepository
+    now = datetime.now()
+    _seed_tool_hours(settings, now, [(h, 2000, 10, 99.0) for h in range(3, 9)]            # normal NG 0.5%
+                     + [(0, 1000, 20, 99.0), (1, 1000, 20, 99.0)])                         # now 2.0%: 4x, +1.5 points
+    repo = DatabaseRepository(settings.database_path)
+    try:
+        assert [d.kind for d in drift.find_drift(repo, now, 10.0, 200)] == ["ng"]
+    finally:
+        repo.dispose()

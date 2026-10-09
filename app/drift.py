@@ -70,7 +70,7 @@ def find_drift(repo, now: datetime, pct: float, min_count: int) -> list[Drift]:
             if b_avg and abs(r_avg - b_avg) / abs(b_avg) * 100 >= pct:
                 out.append(Drift(sensor, program, tool, name, "score", b_avg, r_avg, cnt))
         r_ng, b_ng = ng / cnt * 100, bng / bcnt * 100
-        if r_ng >= 2 * b_ng and r_ng - b_ng >= 3:
+        if r_ng >= 2 * b_ng and r_ng - b_ng >= 1:      # doubled, and at least 1 point (lines run at ~0.5% NG)
             out.append(Drift(sensor, program, tool, name, "ng", b_ng, r_ng, cnt))
     return out
 
