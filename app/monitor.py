@@ -269,8 +269,10 @@ def render(snap: Snapshot, st: Style, width: int = 80, interval: float | None = 
                 + (f"   capacity ~{cap:,.0f} files/s" if cap else ""))
             cur = sum(lm.values()) / 60
             if cap and cur > 0.8 * cap:
+                worst = max(((tm[k], lab) for k, lab in names if k in tm), default=None)
+                slow = f"slowest step: {worst[1]} {worst[0]:.0f} ms/file" if worst else "see Time/file"
                 alerts.append(f"the PC handles ~{cap:,.0f} files/s but the sensor sends {cur:,.1f}/s - "
-                              "it will fall behind (see Time/file for the slow step)")
+                              f"it will fall behind ({slow})")
         res = (f" Session  processed {_n(h.get('processed'))}   PASS {_n(h.get('pass'))}   "
                f"FAIL {_n(h.get('fail'))}   UNKNOWN {_n(h.get('unknown'))}   dup {_n(h.get('duplicates'))}")
         add(res)
