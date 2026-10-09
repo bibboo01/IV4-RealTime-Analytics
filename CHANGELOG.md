@@ -4,6 +4,9 @@ Version number = `VERSION` file. Show it with `run version`; it also appears in 
 `run status`, the Google Sheets Status tab and `logs/health.json`.
 Rule: x.y.z - z = bug fix, y = new feature (data and settings stay compatible), x = needs manual steps.
 
+## 1.11.1 - 2026-10-09
+- Drift check: a tool's NG rate now counts as drifting when it doubles and rises by at least 1 point (was 3 points, too coarse for a line that normally runs at ~0.5% NG).
+
 ## 1.11.0 - 2026-10-09
 - Start-up self-check after a power cut or crash: the agent writes a marker on a normal stop; at the next start it tells whether the stop was normal or not, how long it was down, how many half-processed files it recovered, and (after an abnormal stop) runs a database integrity check in the background. Saved to `logs\last_boot.json` and the log. Telegram announces an abnormal stop once (a normal restart under 5 minutes stays silent).
 - `run doctor-boot`: shows what happened at the last start and checks the database now (`--full` = deeper, slower).
