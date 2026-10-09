@@ -4,6 +4,10 @@ Version number = `VERSION` file. Show it with `run version`; it also appears in 
 `run status`, the Google Sheets Status tab and `logs/health.json`.
 Rule: x.y.z - z = bug fix, y = new feature (data and settings stay compatible), x = needs manual steps.
 
+## 1.9.0 - 2026-10-09
+- Lineage: every inspection now records the program version and a hash of the settings it was processed with (`app_version`, `config_hash`; new columns are added automatically). The agent stores each distinct settings snapshot once (secrets and paths removed). `run lineage` lists the history and what changed between snapshots, so a change in NG% can be traced to a version or setting. Rows saved before 1.9.0 stay empty.
+- `run export-dataset <folder>`: copy archived images into a labelled, versioned training set (`images/NG`, `images/OK`, `labels.csv`, `dataset.json` with `ds-<date>-<hash>` version, counts and the lineage). Default = all NG + the same number of random OK images; options `--from/--to`, `--sensor`, `--ok-per-ng`, `--limit`, `--dry-run`. Images are copied, never moved; the same options on the same data give the same version; an existing dataset folder is never overwritten.
+
 ## 1.8.0 - 2026-10-09
 - Self-healing: `run heal` restarts the agent when it is alive but stuck (heartbeat older than `IV4_HEAL_STALE_SEC`, default 180 s, and the agent has been up longer than that). The 5-minute health-check task now calls it, so a hang fixes itself without anyone watching - `run update` is enough, no reinstall of the tasks. Limits: 3 restarts per hour (then it leaves the problem visible), never starts an agent you stopped with `run stop`. Decisions are logged to `logs\heal.log`; `run heal --dry-run` shows what it would do.
 

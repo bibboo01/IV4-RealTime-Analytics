@@ -85,11 +85,26 @@ class Inspection(Base):
     uploaded_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     upload_ref: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
+    # Lineage: program version + settings snapshot that produced this row (see app/lineage.py)
+    app_version: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    config_hash: Mapped[str | None] = mapped_column(String(16), nullable=True)
+
     # Stored as UTC
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False, index=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
     )
+
+
+class ConfigHistory(Base):
+    """One row per distinct (version, settings) the agent has run with."""
+
+    __tablename__ = "config_history"
+
+    hash: Mapped[str] = mapped_column(String(16), primary_key=True)
+    app_version: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    first_seen: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    settings_json: Mapped[str] = mapped_column(Text, nullable=False)
 
 
 class HourlyStats(Base):
@@ -276,6 +291,7 @@ class DatabaseRepository:
         self.database_path = Path(database_path)
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
 
+        self.lineage: tuple[str | None, str | None] = (None, None)   # (app version, settings hash)
         self.engine = create_engine(
             f"sqlite:///{self.database_path.resolve()}",
             connect_args={"timeout": 30},
@@ -440,9 +456,22 @@ class DatabaseRepository:
             session.commit()
         return out
 
-    @staticmethod
-    def _values(record, analysis, image_file, folder) -> dict:
+    def set_lineage(self, version: str, settings_snapshot: dict, digest: str) -> None:
+        """Stamp every inspection saved from now on, and remember this settings snapshot (once)."""
+        self.lineage = (version, digest)
+        try:
+            with self.engine.begin() as conn:
+                conn.execute(text(
+                    "INSERT OR IGNORE INTO config_history (hash, app_version, first_seen, settings_json) "
+                    "VALUES (:h, :v, :t, :j)"),
+                    {"h": digest, "v": version, "t": _utcnow(), "j": json.dumps(settings_snapshot, default=str)})
+        except Exception as exc:  # noqa: BLE001 - never block start-up on a busy database
+            log.warning("[LINEAGE] could not record the settings snapshot now: %s", str(exc).splitlines()[0][:120])
+
+    def _values(self, record, analysis, image_file, folder) -> dict:
         return dict(
+            app_version=self.lineage[0],
+            config_hash=self.lineage[1],
             inspection_id=record.inspection_id,
             timestamp=record.timestamp,
             machine_id=record.machine_id,

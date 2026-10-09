@@ -89,6 +89,9 @@ class IV4Agent:
         self.settings = settings
         settings.ensure_dirs()
         self.repo = repository or DatabaseRepository(settings.database_path)
+        from app import lineage
+        snap = lineage.snapshot(settings)
+        self.repo.set_lineage(read_version(), snap, lineage.config_hash(snap))
         self.tracker = StabilityTracker(settings.settle_seconds, clock=clock)
         self.clock = clock
 
