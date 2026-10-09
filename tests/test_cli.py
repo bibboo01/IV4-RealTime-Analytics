@@ -362,7 +362,8 @@ def test_drift_flags_score_drop_and_ng_jump_but_not_thin_data_or_when_off(settin
 def test_drift_quiet_when_nothing_moved(settings, capsys):
     _seed_tool_hours(settings, datetime.now(), [(h, 500, 5, 99.0) for h in range(0, 9)])
     assert cli.COMMANDS["drift"]([], settings) == 0
-    assert "No drift" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "No drift." in out and "ok" in out and "normal 99.0" in out
 
 
 def test_report_writes_html_for_a_day_and_handles_empty_and_bad_dates(settings, tmp_path, capsys):
@@ -391,3 +392,9 @@ def test_drift_ng_jump_is_caught_on_a_low_ng_line(settings):
         assert [d.kind for d in drift.find_drift(repo, now, 10.0, 200)] == ["ng"]
     finally:
         repo.dispose()
+
+
+def test_drift_table_explains_why_a_tool_cannot_be_compared(settings, capsys):
+    _seed_tool_hours(settings, datetime.now(), [(0, 500, 5, 99.0)])         # no history at all
+    assert cli.COMMANDS["drift"]([], settings) == 0
+    assert "cannot compare: only 0 past inspections (needs 2,000)" in capsys.readouterr().out

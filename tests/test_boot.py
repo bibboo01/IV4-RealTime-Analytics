@@ -74,3 +74,14 @@ def test_notify_announces_a_power_cut_once(tmp_path):
     w.announce_boot()
     w.announce_boot()
     assert len(sent) == 1 and "ไฟดับ" in sent[0] and "45" in sent[0] and "ปกติ" in sent[0]
+
+
+def test_large_database_is_not_read_at_startup(tmp_path, monkeypatch):
+    s = load_settings(base_dir=tmp_path)
+    s.ensure_dirs()
+    DatabaseRepository(s.database_path).dispose()
+    monkeypatch.setattr(boot, "AUTO_CHECK_MAX_BYTES", 10)
+    called = []
+    monkeypatch.setattr(boot, "quick_check", lambda *a, **k: called.append(1) or "ok")
+    rep = boot.record_start(s, {"heartbeat_at": iso(30)}, None, 0, logging.getLogger("t"), now=NOW)
+    assert called == [] and rep["db_check"].startswith("skipped")

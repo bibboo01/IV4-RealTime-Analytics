@@ -15,6 +15,7 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
+AUTO_CHECK_MAX_BYTES = 1_000_000_000      # above this the start-up check would compete with production for the disk
 NOTIFY_AFTER_MIN = 5          # a shorter gap is a plain restart (update, run restart): not worth a message
 
 
@@ -72,7 +73,12 @@ def record_start(s, prev_health: dict | None, marker: dict | None, recovered: in
         return rep
     log.info("[BOOT] %s restart after %.1f min down, %d file(s) recovered",
              "normal" if rep["clean"] else "UNCLEAN (power cut or crash)", rep["downtime_min"], recovered)
-    if not rep["clean"]:
+    big = s.database_path.exists() and s.database_path.stat().st_size > AUTO_CHECK_MAX_BYTES
+    if not rep["clean"] and big:
+        rep["db_check"] = "skipped (database is large - reading it all would slow the disk; run: run doctor-boot)"
+        log.info("[BOOT] database check skipped (large database); run doctor-boot when the line is idle")
+        save()
+    elif not rep["clean"]:
         def check():
             rep["db_check"] = quick_check(s.database_path)
             (log.info if rep["db_check"] == "ok" else log.error)("[BOOT] database check: %s", rep["db_check"])

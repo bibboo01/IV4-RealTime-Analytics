@@ -51,44 +51,69 @@ def _window(repo, start: str, end: str) -> dict:
         return {(r[0], r[1], r[2]): r[3:] for r in c.execute(text(sql), {"a": start, "b": end})}
 
 
+def compare(repo, now: datetime, min_count: int) -> list[dict]:
+    """Every tool: recent vs normal, or why it cannot be compared yet."""
+    split = now - timedelta(hours=RECENT_HOURS - 1)          # recent = current hour and the one before
+    recent = _window(repo, _hour(split), _hour(now + timedelta(hours=1)))
+    base = _window(repo, _hour(split - timedelta(days=BASELINE_DAYS)), _hour(split))
+    rows = []
+    for key, (name, cnt, ng, vsum, vcnt) in sorted(recent.items(), key=lambda kv: str(kv[0])):
+        sensor, program, tool = key
+        row = {"sensor": sensor, "program": program, "tool": tool, "name": name, "recent_n": cnt,
+               "recent_ng": ng / cnt * 100 if cnt else None, "recent_avg": vsum / vcnt if vcnt else None,
+               "base_n": 0, "base_ng": None, "base_avg": None, "skip": None}
+        b = base.get(key)
+        if b:
+            row.update(base_n=b[1], base_ng=b[2] / b[1] * 100 if b[1] else None,
+                       base_avg=b[3] / b[4] if b[4] else None)
+        if cnt < min_count:
+            row["skip"] = f"only {cnt:,} recent inspections (needs {min_count:,})"
+        elif not b or b[1] < MIN_BASELINE:
+            row["skip"] = f"only {(b[1] if b else 0):,} past inspections (needs {MIN_BASELINE:,})"
+        rows.append(row)
+    return rows
+
+
 def find_drift(repo, now: datetime, pct: float, min_count: int) -> list[Drift]:
     """Tools whose recent average score moved by >= pct % (either way), or whose NG rate doubled."""
     if pct <= 0:
         return []
-    split = now - timedelta(hours=RECENT_HOURS - 1)          # recent = current hour and the one before
-    recent = _window(repo, _hour(split), _hour(now + timedelta(hours=1)))
-    base = _window(repo, _hour(split - timedelta(days=BASELINE_DAYS)), _hour(split))
     out: list[Drift] = []
-    for key, (name, cnt, ng, vsum, vcnt) in recent.items():
-        b = base.get(key)
-        if not b or cnt < min_count or b[1] < MIN_BASELINE:
+    for r in compare(repo, now, min_count):
+        if r["skip"]:
             continue
-        _, bcnt, bng, bvsum, bvcnt = b[0], b[1], b[2], b[3], b[4]
-        sensor, program, tool = key
-        if vcnt and bvcnt and bvsum:
-            r_avg, b_avg = vsum / vcnt, bvsum / bvcnt
-            if b_avg and abs(r_avg - b_avg) / abs(b_avg) * 100 >= pct:
-                out.append(Drift(sensor, program, tool, name, "score", b_avg, r_avg, cnt))
-        r_ng, b_ng = ng / cnt * 100, bng / bcnt * 100
-        if r_ng >= 2 * b_ng and r_ng - b_ng >= 1:      # doubled, and at least 1 point (lines run at ~0.5% NG)
-            out.append(Drift(sensor, program, tool, name, "ng", b_ng, r_ng, cnt))
+        args = (r["sensor"], r["program"], r["tool"], r["name"])
+        if r["recent_avg"] is not None and r["base_avg"]:
+            if abs(r["recent_avg"] - r["base_avg"]) / abs(r["base_avg"]) * 100 >= pct:
+                out.append(Drift(*args, "score", r["base_avg"], r["recent_avg"], r["recent_n"]))
+        if r["recent_ng"] >= 2 * r["base_ng"] and r["recent_ng"] - r["base_ng"] >= 1:   # doubled and >= 1 point
+            out.append(Drift(*args, "ng", r["base_ng"], r["recent_ng"], r["recent_n"]))
     return out
 
 
 def run(args: list[str], s, _running_pid=None) -> int:
     from app.database.repository import DatabaseRepository
     repo = DatabaseRepository(s.database_path)
+    now = datetime.now()
     try:
-        found = find_drift(repo, datetime.now(), s.drift_pct, s.drift_min)
+        found = find_drift(repo, now, s.drift_pct, s.drift_min)
+        rows = compare(repo, now, s.drift_min)
     finally:
         repo.dispose()
     if s.drift_pct <= 0:
         print("Drift check is off (IV4_DRIFT_PCT=0).")
         return 0
-    if not found:
-        print(f"No drift: every tool is within {s.drift_pct:g}% of its last {BASELINE_DAYS} days "
-              f"(needs {MIN_BASELINE:,}+ past and {s.drift_min:,}+ recent inspections per tool).")
-        return 0
+    print(f"Last {RECENT_HOURS}h vs the {BASELINE_DAYS} days before (alert at {s.drift_pct:g}% score change or NG doubling):")
+    if not rows:
+        print("  no inspections in the last hours.")
+    f = lambda v, d=1: "-" if v is None else f"{v:.{d}f}"   # noqa: E731
+    for r in rows:
+        who = f"{r['sensor']} tool {r['tool']} {r['name'] or ''}".strip()
+        state = r["skip"] and f"cannot compare: {r['skip']}" or ("DRIFT" if any(
+            (d.sensor_id, d.tool_no) == (r["sensor"], r["tool"]) for d in found) else "ok")
+        print(f"  {who:34} score {f(r['recent_avg'])} (normal {f(r['base_avg'])})   "
+              f"NG {f(r['recent_ng'], 2)}% (normal {f(r['base_ng'], 2)}%)   {state}")
+    print("No drift." if not found else "")
     for d in found:
         print(" ! " + d.describe())
     return 0
