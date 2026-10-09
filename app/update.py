@@ -5,6 +5,8 @@ Download the new version as a ZIP (GitHub: Code > Download ZIP), then:
 
     run update C:\\Users\\me\\Downloads\\IV4-RealTime-Analytics-production-hardening.zip
     run update <zip> --dry-run      show what would change, change nothing
+    run update <zip> --restart      safe update: stop, update, self-test, start, watch it for 2 minutes and
+                                    GO BACK to the old version by itself if anything fails
 
 Only program files are replaced (app/, scripts/, deploy/, tests/, run.bat, run.sh, README.md,
 requirements*.txt, .env.example). NEVER touched: .env, data/, logs/, credentials/, backups/, .venv/.
@@ -13,9 +15,11 @@ The old program files are saved to backups/code-<date>.zip first. The agent must
 from __future__ import annotations
 
 import shutil
+import subprocess
+import sys
 import tempfile
 import zipfile
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from app.config import BASE_DIR, Settings
@@ -89,8 +93,112 @@ def apply(src: Path, dst: Path, p: dict) -> None:
             pass
 
 
-def run(args: list[str], s: Settings, running_pid, base: Path | None = None) -> int:
+def restore_backup(zip_path: Path, base: Path) -> bool:
+    """Put the program files of a backup zip back (same rules as update: data/.env untouched)."""
+    tmp = Path(tempfile.mkdtemp(prefix="iv4-restore-"))
+    try:
+        with zipfile.ZipFile(zip_path) as z:
+            z.extractall(tmp)
+        root = find_root(tmp)
+        if root is None:
+            return False
+        apply(root, base, plan(root, base))
+        return True
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def default_pip(base: Path) -> tuple[bool, str]:
+    r = subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-r", str(base / "requirements.txt")],
+                       capture_output=True, text=True, timeout=900)
+    return r.returncode == 0, (r.stderr or r.stdout).strip()[-300:]
+
+
+SMOKE = ("import importlib, pkgutil, app\n"
+         "for m in pkgutil.walk_packages(app.__path__, 'app.'):\n"
+         "    if not m.name.endswith('__main__'):\n"
+         "        importlib.import_module(m.name)\n"
+         "from app.config import load_settings; load_settings()\n"
+         "from app.version import read_version; print(read_version())")
+
+
+def default_smoke(base: Path) -> tuple[bool, str]:
+    """The NEW code, in a fresh process: every module imports and the settings load."""
+    r = subprocess.run([sys.executable, "-X", "utf8", "-c", SMOKE], cwd=base, capture_output=True, text=True, timeout=180)
+    return r.returncode == 0, (r.stderr or r.stdout).strip().splitlines()[-1][:300] if (r.stderr or r.stdout).strip() else ""
+
+
+def default_wait_healthy(s: Settings, version: str, since: datetime, timeout: int) -> tuple[bool, str]:
+    """The restarted agent writes a fresh heartbeat with the NEW version."""
+    import json
+    import time
+    deadline = time.time() + timeout
+    why = "no heartbeat from the new agent"
+    while time.time() < deadline:
+        try:
+            h = json.loads((s.log_dir / "health.json").read_text(encoding="utf-8"))
+            started = datetime.fromisoformat(h["started_at"])
+            beat = datetime.fromisoformat(h["heartbeat_at"])
+            now = datetime.now(timezone.utc)
+            if started >= since and h.get("version") == version and (now - beat).total_seconds() < 30:
+                return True, f"heartbeat {(now - beat).total_seconds():.0f}s old, version {version}"
+            why = f"version {h.get('version')} started {started:%H:%M:%S}, heartbeat {(now - beat).total_seconds():.0f}s old"
+        except (OSError, ValueError, KeyError):
+            pass
+        time.sleep(3)
+    return False, why
+
+
+def safe_install(root: Path, base: Path, p: dict, s: Settings, running_pid, new_v: str, hooks: dict | None,
+                 timeout: int = 120) -> int:
+    """Stop, apply, self-test, start, watch. Anything wrong -> restore the backup and start the old version."""
+    hk = {"stop": None, "start": None, "pip": default_pip, "smoke": default_smoke,
+          "wait": default_wait_healthy, **(hooks or {})}
+    if running_pid():
+        print("Stopping the agent...")
+        if hk["stop"]() != 0:
+            print("The agent did not stop - nothing changed.")
+            return 1
+    saved = backup_code(base, base / "backups" / f"code-{datetime.now():%Y%m%d-%H%M%S}.zip")
+    print(f"Old program saved to {saved}")
+    since = datetime.now(timezone.utc)
+    need_pip = any(f.startswith("requirements") for f in p["new"] + p["changed"])
+    apply(root, base, p)
+    problem = None
+    if need_pip:
+        print("Installing new requirements...")
+        ok, msg = hk["pip"](base)
+        problem = None if ok else f"installing requirements failed: {msg}"
+    if not problem:
+        print("Self-test of the new version...")
+        ok, msg = hk["smoke"](base)
+        problem = None if ok else f"self-test failed: {msg}"
+    if not problem:
+        print("Starting the new version...")
+        hk["start"]()
+        print(f"Watching it for up to {timeout}s...")
+        ok, msg = hk["wait"](s, new_v, since, timeout)
+        print(f"  {msg}")
+        problem = None if ok else f"new version is not healthy: {msg}"
+    if not problem:
+        print(f"Updated to version {new_v} and it is running. Old version kept in {saved.name} (run rollback).")
+        return 0
+    print(f"PROBLEM: {problem}")
+    print("Going back to the old version...")
+    if running_pid():
+        hk["stop"]()
+    if not restore_backup(saved, base):
+        print(f"Could not restore automatically. Run: run rollback {saved}")
+        return 1
+    hk["start"]()
+    print(f"ROLLED BACK to the old version (backup {saved.name}). Send logs\\agent.log if you want it investigated.")
+    return 1
+
+
+def run(args: list[str], s: Settings, running_pid, base: Path | None = None, hooks: dict | None = None,
+        timeout: int = 120) -> int:
     base = base or BASE_DIR
+    safe = "--restart" in args
     dry = "--dry-run" in args
     rest = [a for a in args if not a.startswith("--")]
     if "-h" in args or "--help" in args or len(rest) != 1:
@@ -102,7 +210,7 @@ def run(args: list[str], s: Settings, running_pid, base: Path | None = None) -> 
         return 2
 
     pid = running_pid()
-    if pid and not dry:
+    if pid and not dry and not safe:
         print(f"The agent is running (pid {pid}). Stop it first: run stop")
         return 1
 
@@ -146,6 +254,8 @@ def run(args: list[str], s: Settings, running_pid, base: Path | None = None) -> 
             print("(dry run - nothing changed)")
             return 0
 
+        if safe:
+            return safe_install(root, base, p, s, running_pid, new_v, hooks, timeout)
         saved = backup_code(base, base / "backups" / f"code-{datetime.now():%Y%m%d-%H%M%S}.zip")
         print(f"Old program saved to {saved}")
         apply(root, base, p)

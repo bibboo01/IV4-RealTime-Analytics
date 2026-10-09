@@ -120,3 +120,72 @@ def test_rollback_without_backups_or_with_bad_file(setup, tmp_path):
     bad = tmp_path / "bad.zip"
     bad.write_text("x")
     assert update.rollback([str(bad)], s, lambda: None, base=inst) == 2
+
+
+def hooks(**over):
+    log = []
+    h = {"stop": lambda: log.append("stop") or 0, "start": lambda: log.append("start") or 0,
+         "pip": lambda base: (log.append("pip") or True, ""), "smoke": lambda base: (True, ""),
+         "wait": lambda s, v, since, t: (True, "ok")}
+    h.update(over)
+    return h, log
+
+
+def test_safe_update_success_stops_updates_starts_and_keeps_backup(setup, capsys):
+    inst, zpath, s = setup
+    h, log = hooks()
+    assert update.run([str(zpath), "--restart"], s, lambda: "9", base=inst, hooks=h) == 0
+    assert (inst / "app" / "cli.py").read_text() == "v2" and log == ["stop", "start"]
+    assert list((inst / "backups").glob("code-*.zip")) and "it is running" in capsys.readouterr().out
+
+
+def test_safe_update_rolls_back_when_self_test_fails(setup, capsys):
+    inst, zpath, s = setup
+    h, log = hooks(smoke=lambda base: (False, "ImportError: boom"))
+    assert update.run([str(zpath), "--restart"], s, lambda: None, base=inst, hooks=h) == 1
+    assert (inst / "app" / "cli.py").read_text() == "v1" and (inst / "app" / "old_module.py").exists()
+    assert (inst / ".env").read_text() == "SECRET=1" and log == ["start"]            # old version started again
+    out = capsys.readouterr().out
+    assert "self-test failed: ImportError: boom" in out and "ROLLED BACK" in out
+
+
+def test_safe_update_rolls_back_when_new_agent_is_not_healthy(setup, capsys):
+    inst, zpath, s = setup
+    h, log = hooks(wait=lambda s_, v, since, t: (False, "no heartbeat from the new agent"))
+    assert update.run([str(zpath), "--restart"], s, lambda: None, base=inst, hooks=h) == 1
+    assert (inst / "app" / "cli.py").read_text() == "v1" and log == ["start", "start"]   # new, then old again
+    assert "not healthy" in capsys.readouterr().out
+
+
+def test_safe_update_installs_requirements_only_when_changed_and_rolls_back_on_failure(setup, tmp_path):
+    inst, zpath, s = setup
+    h, log = hooks()
+    update.run([str(zpath), "--restart"], s, lambda: None, base=inst, hooks=h)
+    assert "pip" not in log                                                          # no requirements in this zip
+    import shutil
+    (inst / "requirements.txt").write_text("a==1")
+    src = tmp_path / "new" / "IV4-RealTime-Analytics-main"
+    (src / "requirements.txt").write_text("a==2")
+    (src / "app" / "cli.py").write_text("v3")
+    z3 = tmp_path / "v3.zip"
+    with zipfile.ZipFile(z3, "w") as z:
+        for p in (tmp_path / "new").rglob("*"):
+            if p.is_file():
+                z.write(p, p.relative_to(tmp_path / "new").as_posix())
+    h, log = hooks(pip=lambda base: (False, "no network"))
+    assert update.run([str(z3), "--restart"], s, lambda: None, base=inst, hooks=h) == 1
+    assert (inst / "app" / "cli.py").read_text() == "v2" and (inst / "requirements.txt").read_text() == "a==1"
+    shutil.rmtree(inst / "backups")
+
+
+def test_safe_update_refuses_to_continue_if_agent_will_not_stop(setup):
+    inst, zpath, s = setup
+    h, log = hooks(stop=lambda: 1)
+    assert update.run([str(zpath), "--restart"], s, lambda: "9", base=inst, hooks=h) == 1
+    assert (inst / "app" / "cli.py").read_text() == "v1"
+
+
+def test_default_smoke_passes_on_the_real_program():
+    from pathlib import Path
+    ok, msg = update.default_smoke(Path(__file__).resolve().parents[1])
+    assert ok, msg

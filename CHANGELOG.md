@@ -4,6 +4,9 @@ Version number = `VERSION` file. Show it with `run version`; it also appears in 
 `run status`, the Google Sheets Status tab and `logs/health.json`.
 Rule: x.y.z - z = bug fix, y = new feature (data and settings stay compatible), x = needs manual steps.
 
+## 1.10.0 - 2026-10-09
+- Safe update: `run update <zip> --restart` stops the agent, saves the old program, installs the new one, installs new requirements if `requirements.txt` changed, self-tests the new code in a fresh process (every module imports, settings load), starts the agent and watches it for up to 2 minutes (fresh heartbeat with the new version). If any step fails it restores the old version by itself and starts it again; `.env`, data and credentials are never touched. Without `--restart`, `run update` behaves as before.
+
 ## 1.9.0 - 2026-10-09
 - Lineage: every inspection now records the program version and a hash of the settings it was processed with (`app_version`, `config_hash`; new columns are added automatically). The agent stores each distinct settings snapshot once (secrets and paths removed). `run lineage` lists the history and what changed between snapshots, so a change in NG% can be traced to a version or setting. Rows saved before 1.9.0 stay empty.
 - `run export-dataset <folder>`: copy archived images into a labelled, versioned training set (`images/NG`, `images/OK`, `labels.csv`, `dataset.json` with `ds-<date>-<hash>` version, counts and the lineage). Default = all NG + the same number of random OK images; options `--from/--to`, `--sensor`, `--ok-per-ng`, `--limit`, `--dry-run`. Images are copied, never moved; the same options on the same data give the same version; an existing dataset folder is never overwritten.

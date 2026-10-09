@@ -5,6 +5,7 @@ IV4 Data Agent - one command for everything.
     run check               preflight checks only
     run clear               delete collected data to start from zero (agent must be stopped; asks first)
     run update <zip>        install a new version from a downloaded ZIP (no git; keeps .env, data, credentials)
+    run update <zip> --restart   safe update: stop, update, self-test, start, watch; goes back by itself if it fails
     run export-dataset <folder>   copy NG + OK images into a versioned, labelled training set (labels.csv, dataset.json)
     run lineage             which program version + settings produced the results (history of changes)
     run heal                restart the agent if it is alive but stuck (the health-check task runs this; --dry-run)
@@ -399,9 +400,23 @@ def cmd_clear(args, s: Settings) -> int:
     return clear.run(args, s, InstanceLock(s.log_dir).running_pid)
 
 
+def _start_background(s: Settings) -> int:
+    """Start the agent without blocking: through the Windows task/service if there is one, else a detached process."""
+    kind = _boot_entry_exists()
+    if kind:
+        cmd = ["schtasks", "/run", "/tn", "IV4DataAgent"] if kind == "task" else ["sc", "start", "IV4DataAgent"]
+        return subprocess.run(cmd, capture_output=True, text=True).returncode
+    flags = (subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP) if os.name == "nt" else 0  # type: ignore[attr-defined]
+    subprocess.Popen([sys.executable, "-X", "utf8", "-m", "app"], cwd=BASE_DIR, stdin=subprocess.DEVNULL,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags,
+                     start_new_session=(os.name != "nt"))
+    return 0
+
+
 def cmd_update(args, s: Settings) -> int:
     from app import update
-    return update.run(args, s, InstanceLock(s.log_dir).running_pid)
+    hooks = {"stop": lambda: cmd_stop(["--force"], s), "start": lambda: _start_background(s)}
+    return update.run(args, s, InstanceLock(s.log_dir).running_pid, hooks=hooks)
 
 
 def cmd_rollback(args, s: Settings) -> int:
