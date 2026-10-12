@@ -1,0 +1,237 @@
+{
+  "uid": "iv4-overview",
+  "title": "IV4 Data Agent",
+  "timezone": "utc",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "1m",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "tags": [
+    "iv4"
+  ],
+  "panels": [
+    {
+      "id": 1,
+      "title": "Inspected today",
+      "type": "stat",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "iv4-sqlite"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "iv4-sqlite"
+          },
+          "queryText": "SELECT SUM(total) AS inspected FROM hourly_stats WHERE hour >= strftime('%Y-%m-%d', 'now') ",
+          "rawQueryText": "SELECT SUM(total) AS inspected FROM hourly_stats WHERE hour >= strftime('%Y-%m-%d', 'now') ",
+          "queryType": "table",
+          "timeColumns": [
+            "time"
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "title": "NG % (selected range)",
+      "type": "stat",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "iv4-sqlite"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "iv4-sqlite"
+          },
+          "queryText": "SELECT ROUND(100.0 * SUM(fail_count) / MAX(SUM(total), 1), 2) AS ng_pct FROM hourly_stats WHERE CAST(strftime('%s', hour || ':00:00') AS INTEGER) BETWEEN $__from / 1000 AND $__to / 1000",
+          "rawQueryText": "SELECT ROUND(100.0 * SUM(fail_count) / MAX(SUM(total), 1), 2) AS ng_pct FROM hourly_stats WHERE CAST(strftime('%s', hour || ':00:00') AS INTEGER) BETWEEN $__from / 1000 AND $__to / 1000",
+          "queryType": "table",
+          "timeColumns": [
+            "time"
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "title": "Inspections per hour",
+      "type": "timeseries",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "iv4-sqlite"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "iv4-sqlite"
+          },
+          "queryText": "SELECT CAST(strftime('%s', hour || ':00:00') AS INTEGER) AS time, SUM(total) AS total, SUM(fail_count) AS NG FROM hourly_stats WHERE CAST(strftime('%s', hour || ':00:00') AS INTEGER) BETWEEN $__from / 1000 AND $__to / 1000 GROUP BY hour ORDER BY hour",
+          "rawQueryText": "SELECT CAST(strftime('%s', hour || ':00:00') AS INTEGER) AS time, SUM(total) AS total, SUM(fail_count) AS NG FROM hourly_stats WHERE CAST(strftime('%s', hour || ':00:00') AS INTEGER) BETWEEN $__from / 1000 AND $__to / 1000 GROUP BY hour ORDER BY hour",
+          "queryType": "time_series",
+          "timeColumns": [
+            "time"
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "title": "NG % per hour",
+      "type": "timeseries",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "iv4-sqlite"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 4,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "iv4-sqlite"
+          },
+          "queryText": "SELECT CAST(strftime('%s', hour || ':00:00') AS INTEGER) AS time, ROUND(100.0 * SUM(fail_count) / SUM(total), 2) AS ng_pct FROM hourly_stats WHERE CAST(strftime('%s', hour || ':00:00') AS INTEGER) BETWEEN $__from / 1000 AND $__to / 1000 GROUP BY hour ORDER BY hour",
+          "rawQueryText": "SELECT CAST(strftime('%s', hour || ':00:00') AS INTEGER) AS time, ROUND(100.0 * SUM(fail_count) / SUM(total), 2) AS ng_pct FROM hourly_stats WHERE CAST(strftime('%s', hour || ':00:00') AS INTEGER) BETWEEN $__from / 1000 AND $__to / 1000 GROUP BY hour ORDER BY hour",
+          "queryType": "time_series",
+          "timeColumns": [
+            "time"
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "title": "NG % per tool per hour",
+      "type": "timeseries",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "iv4-sqlite"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 24,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "iv4-sqlite"
+          },
+          "queryText": "SELECT CAST(strftime('%s', hour || ':00:00') AS INTEGER) AS time, tool_no || ' ' || COALESCE(tool_name, '') AS tool, ROUND(100.0 * SUM(ng_count) / SUM(count), 2) AS ng_pct FROM hourly_tool_stats WHERE CAST(strftime('%s', hour || ':00:00') AS INTEGER) BETWEEN $__from / 1000 AND $__to / 1000 GROUP BY hour, tool_no ORDER BY hour",
+          "rawQueryText": "SELECT CAST(strftime('%s', hour || ':00:00') AS INTEGER) AS time, tool_no || ' ' || COALESCE(tool_name, '') AS tool, ROUND(100.0 * SUM(ng_count) / SUM(count), 2) AS ng_pct FROM hourly_tool_stats WHERE CAST(strftime('%s', hour || ':00:00') AS INTEGER) BETWEEN $__from / 1000 AND $__to / 1000 GROUP BY hour, tool_no ORDER BY hour",
+          "queryType": "time_series",
+          "timeColumns": [
+            "time"
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "transformations": [
+        {
+          "id": "partitionByValues",
+          "options": {
+            "fields": [
+              "tool"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Missing files (counter gaps)",
+      "type": "table",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "iv4-sqlite"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 21,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "iv4-sqlite"
+          },
+          "queryText": "SELECT hour, sensor_id, total, trigger_max - trigger_min + 1 - total AS missing FROM hourly_stats WHERE trigger_resets = 0 AND trigger_max IS NOT NULL AND CAST(strftime('%s', hour || ':00:00') AS INTEGER) BETWEEN $__from / 1000 AND $__to / 1000 AND trigger_max - trigger_min + 1 - total > 0 ORDER BY hour DESC LIMIT 200",
+          "rawQueryText": "SELECT hour, sensor_id, total, trigger_max - trigger_min + 1 - total AS missing FROM hourly_stats WHERE trigger_resets = 0 AND trigger_max IS NOT NULL AND CAST(strftime('%s', hour || ':00:00') AS INTEGER) BETWEEN $__from / 1000 AND $__to / 1000 AND trigger_max - trigger_min + 1 - total > 0 ORDER BY hour DESC LIMIT 200",
+          "queryType": "table",
+          "timeColumns": [
+            "time"
+          ]
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    }
+  ]
+}
