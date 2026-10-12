@@ -4,9 +4,6 @@ Version number = `VERSION` file. Show it with `run version`; it also appears in 
 `run status`, the Google Sheets Status tab and `logs/health.json`.
 Rule: x.y.z - z = bug fix, y = new feature (data and settings stay compatible), x = needs manual steps.
 
-## 1.13.0 - 2026-10-12
-- Optional monitoring add-ons (nothing changes unless you install them): a ready-made Grafana dashboard (`deploy\grafana\`, reads the hourly summary tables read-only) and an Uptime Kuma push heartbeat from `deploy\healthcheck.ps1` (`IV4_KUMA_PUSH_URL`). Guide: `docs\monitoring.md`. Tests check that every dashboard query runs on the real schema.
-
 ## 1.12.0 - 2026-10-12
 - New `run report --excel`: an Excel workbook from the live database with a written summary (findings, low-volume hours, high-NG hours, per-tool NG, drift, next checks), native charts, hourly / daily / per-tool / hour-of-day tables, NG reasons and optional sample NG pictures. Options: `--days N`, `--from/--to`, `--all`, `--images N`, `--lang th|en`, `--out`. Needs `openpyxl` (listed in `requirements-report.txt`, installed automatically on first use).
 - Fix: the Telegram "already sent" memory was pruned with the real clock instead of the tick time (only visible when replaying old dates in tests).

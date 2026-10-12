@@ -10,8 +10,7 @@ param(
     [string]$ProjectDir = (Resolve-Path "$PSScriptRoot\..").Path,
     [int]$MaxHeartbeatAgeSec = 60,
     [int]$MaxIncomingFilesPerSensor = 400,   # ~10 s of full-rate output (2 files x 20/s); normal is ~60
-    [string]$ServiceName = "IV4DataAgent",
-    [string]$KumaPushUrl = $env:IV4_KUMA_PUSH_URL   # optional Uptime Kuma "Push" monitor URL (heartbeat on healthy, alert when it stops)
+    [string]$ServiceName = "IV4DataAgent"
 )
 
 $problems = @()
@@ -54,9 +53,7 @@ if ($problems.Count -gt 0) {
     }
     try { Write-EventLog -LogName Application -Source "IV4DataAgent" -EntryType Error -EventId 1001 -Message $msg } catch {}
     Write-Output $msg
-    if ($KumaPushUrl) { try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 10 -Uri ($KumaPushUrl + "?status=down&msg=" + [uri]::EscapeDataString($msg.Substring(0, [Math]::Min(200, $msg.Length)))) | Out-Null } catch {} }
     exit 1
 }
-if ($KumaPushUrl) { try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 10 -Uri ($KumaPushUrl + "?status=up&msg=OK") | Out-Null } catch {} }
 Write-Output "IV4 Data Agent healthy"
 exit 0
