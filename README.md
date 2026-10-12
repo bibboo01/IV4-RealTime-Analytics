@@ -2,7 +2,7 @@
 
 ระบบสำหรับรับข้อมูล Inspection จาก **KEYENCE IV4 G500CA** แบบอัตโนมัติ โดยรับไฟล์จาก Sensor ได้แก่ Image (`JPG/JPEG`) และข้อมูลผลการตรวจสอบ (`TXT`) จากนั้นทำการจับคู่ข้อมูล, Parse ข้อมูล, วิเคราะห์ผล และบันทึกลงฐานข้อมูล
 
-> **Current Status:** Core Realtime Pipeline พร้อม Production (hardened, 134 automated tests) — รองรับ sensor หลายตัว, Live monitor ใน terminal, Google Drive + Google Sheets Dashboard, ติดตั้งและรันด้วยคำสั่งเดียว (`run`, `run production`)  
+> **Current Status:** Core Realtime Pipeline พร้อม Production (hardened, 219 automated tests บน Windows/Linux) เวอร์ชัน 1.12.0 — รองรับ sensor หลายตัว, Live monitor ใน terminal, Google Drive + Google Sheets Dashboard, รายงาน HTML/Excel, อัปเดตแบบปลอดภัย + rollback, self-heal, ตรวจ DB หลังไฟดับ, แจ้งเตือน NG/drift/ไฟล์ค้าง, ติดตั้งและรันด้วยคำสั่งเดียว (`run`, `run production`) ประวัติการเปลี่ยนแปลงดู `CHANGELOG.md`  
 > **เริ่มใช้งาน:** ดูหัวข้อ **ติดตั้งและรัน** ด้านล่าง  
 > **Google Drive / Sheets:** พร้อมใช้งาน (ปิดไว้เป็นค่าเริ่มต้น — ตั้ง `IV4_UPLOAD_ENABLED=true` / `IV4_SHEETS_ENABLED=true` ใน `.env` หลังเชื่อมบัญชี)
 
@@ -116,9 +116,14 @@ run production --passive 50000-50100      # ทำจริง (ใส่ช่�
 
 ## อัปเดตเวอร์ชัน
 
+**วิธีแนะนำ (ไม่ต้องใช้ git):** ดาวน์โหลด ZIP ของเวอร์ชันใหม่ แล้วรัน `run update <zip> --restart` ระบบจะ หยุด agent → สำรองของเก่า → ติดตั้งโค้ดใหม่ (ไม่แตะ `.env`, `credentials\`, `data\`, `logs\`, `backups\`) → ติดตั้ง library เฉพาะที่เปลี่ยน → ทดสอบเริ่มระบบ (smoke test) → เริ่ม agent → รอดู heartbeat และ **ย้อนกลับเองอัตโนมัติถ้าไม่ปกติ** ย้อนเองได้ทีหลังด้วย `run rollback` ตรวจเวอร์ชันด้วย `run version`
+
+**วิธีเดิม (ทำเอง):**
 1. `run backup` (สำรองก่อน)
 2. ดึงโค้ดใหม่ (`git pull` หรือก๊อปทับ) **โดยไม่ลบ** `.env`, `credentials\`, `data\`, `logs\`, `backups\`
 3. restart agent (หรือรัน `run` ใหม่) — library ถูกติดตั้งใหม่เฉพาะเมื่อ `requirements.txt` เปลี่ยน และ database อัปเกรดโครงสร้างให้เองโดยข้อมูลเดิมอยู่ครบ
+
+**Excel report ครั้งแรก:** `run report --excel` จะติดตั้ง `openpyxl` ให้เอง (ต้องต่อเน็ตครั้งเดียว) ตามรายการใน `requirements-report.txt`
 
 ## ถอนการติดตั้ง
 
@@ -136,6 +141,11 @@ run production --passive 50000-50100      # ทำจริง (ใส่ช่�
 | วันที่/เวลาใน metric ผิด | `IV4_DATE_FORMAT` ไม่ตรงกับ sensor (ดู `Time and Date` ใน TXT) |
 | ไม่อัปโหลดขึ้น Drive | `run upload` — ที่พบบ่อย: `IV4_UPLOAD_ENABLED` ยังเป็น `false`, มีแต่ชิ้น OK (ส่งเฉพาะ NG เป็นค่าเริ่มต้น), แก้ `.env` แล้วไม่ restart |
 | Google ขึ้น 403 access_denied | Publish app หรือเพิ่ม Gmail เป็น Test user ใน OAuth consent screen |
+| `run` ขึ้น STOPPED หรือ heartbeat เก่า | `run heal` (ตั้งไว้ในงานตรวจสุขภาพทุก 5 นาที) รีสตาร์ท agent ที่ค้างให้เองไม่เกิน 3 ครั้ง/ชม. และไม่เริ่ม agent ที่ถูกหยุดด้วยมือ ดูผลที่ `logs\heal.log` |
+| เตือน `Missing` แต่จริงๆ คือไฟล์ค้างรอประมวลผล | ไฟล์ที่ยังอยู่ใน incoming นับเป็น missing ชั่วคราวจนกว่าจะประมวลผลเสร็จ ดู `Waiting` ควบคู่ ถ้า Waiting ลดลงเอง = เป็นแค่ backlog |
+| ประมวลผลช้าเป็นช่วงๆ (`[SLOW]` ใน `logs\agent.log`) | บรรทัด `[SLOW]` บอกเวลาแต่ละขั้น (ms/ไฟล์) ขั้นที่ช้าสุดอยู่ใน alert ของ monitor ที่พบบ่อยคือ HDD/Defender → `run production`, ใช้ SSD, ตรวจสุขภาพดิสก์ |
+| NG พุ่งเป็นช่วงๆ (เช่น 30-90% ในชั่วโมงเดียว) | มักเป็นปัจจัยภายนอก (แสง, ตำแหน่งชิ้นงาน, ล็อต, เลนส์สกปรก) ไม่ใช่ชิ้นงานเสียจริง → ดูรูป NG ใน `archive\วัน\NG\ชั่วโมง\` เทียบกับรูป OK, ใช้ `run drift` ดู Tool ที่เบี่ยง และ `run report --excel --images 20` ดูช่วงเวลาที่ซ้ำ |
+| ไฟดับ/เครื่องค้างแล้วเริ่มใหม่ | agent กู้ไฟล์ค้างเองและตรวจ DB หลังหยุดผิดปกติ ดูผลด้วย `run doctor-boot` แนะนำ UPS และตั้ง BIOS ให้เปิดเครื่องเองเมื่อไฟมา |
 | แก้ `.env.example` แล้วไม่มีผล | ต้องแก้ `.env` (ไฟล์จริง) |
 
 ---
@@ -296,6 +306,17 @@ iv4-data-agent/
 │   ├── diagnose.py          # run upload: ตรวจว่าทำไมไม่อัปโหลด
 │   ├── production.py        # run production: ตั้งเครื่อง Windows ให้พร้อมใช้งานจริง
 │   ├── maintenance.py       # retention + disk guard
+│   ├── notify.py            # แจ้งเตือน Telegram (สรุปกะ, NG, drift, ไฟดับ)
+│   ├── update.py            # run update / rollback (สำรอง, smoke test, ย้อนอัตโนมัติ)
+│   ├── heal.py              # run heal: รีสตาร์ท agent ที่ค้าง
+│   ├── boot.py              # ตรวจการหยุดผิดปกติ/ไฟดับตอนเริ่ม + run doctor-boot
+│   ├── drift.py             # run drift: Tool ที่ค่าเบี่ยงจากปกติ 7 วัน
+│   ├── lineage.py           # บันทึก/ดูเวอร์ชันโปรแกรมและ config ของผลตรวจ
+│   ├── dataset.py           # run export-dataset: คัดรูปเป็นชุดเทรน
+│   ├── report.py            # run report: รายงาน HTML รายวัน (+ ทางเข้า --excel)
+│   ├── report_xlsx.py       # run report --excel: Excel + กราฟ + สรุปละเอียด
+│   ├── clear.py             # run clear: ล้างข้อมูลเริ่มใหม่ (ไม่แตะ .env/credentials)
+│   ├── version.py           # อ่านเลขเวอร์ชันจากไฟล์ VERSION
 │   │
 │   ├── ingestion/
 │   │   ├── __init__.py
@@ -360,13 +381,18 @@ iv4-data-agent/
 │   ├── test_sheets.py
 │   ├── test_production.py
 │   ├── test_diagnose.py
+│   ├── test_notify.py / test_update.py / test_heal.py / test_boot.py
+│   ├── test_dataset.py / test_report_xlsx.py / test_clear.py
 │   └── test_cli.py          # + test_metrics / test_multi_sensor / test_database
 │
 ├── run.bat                  # คำสั่งเดียว (Windows)
 ├── run.sh                   # คำสั่งเดียว (Linux/macOS)
 ├── .env.example
 ├── .gitignore
+├── VERSION                  # เลขเวอร์ชัน (x.y.z)
+├── CHANGELOG.md             # ประวัติการเปลี่ยนแปลง
 ├── requirements.txt
+├── requirements-report.txt  # openpyxl (ติดตั้งเองเมื่อใช้ run report --excel)
 ├── requirements-dev.txt
 └── README.md
 ```
@@ -701,6 +727,18 @@ Parser ตรวจรูปแบบอัตโนมัติ (IV4 tab / `key
 ---
 
 # 14. ส่งข้อมูลทุกชิ้น (Good + NG) — ความจุและ Metric
+
+## 14.0 ผลรันจริงบนเครื่องผลิต (IV4-01, 8-11 ตค 2569)
+
+| รายการ | ผล |
+| --- | --- |
+| ปริมาณ | ~12,000 ชิ้น/ชม. (trigger ทุก 300 ms ≈ 3.33 ชิ้น/วินาที) รวม 780,946 ชิ้น ใน 4 วัน (8 ตค 13:00 ถึง 11 ตค 07:34) |
+| ไฟล์หาย | 57 ชิ้น (0.007%) ส่วนใหญ่ 52 ชิ้นจากเหตุการณ์เดียว ไม่มี UNKNOWN |
+| เวลาประมวลผล | เฉลี่ย ~35 ms, สูงสุด 36 ms |
+| NG | 24 ชม.แรก 0.76% (ปกติ ~0.3-1%/ชม.) แต่ 10-11 ตค มีหลายชั่วโมงพุ่ง (สูงสุด 94.5%) ส่วนใหญ่จาก Tool 1 ช่วงเช้า |
+| ข้อสังเกตฮาร์ดแวร์ | ช่วงที่ประมวลผลช้าลงเป็นครั้งคราว (HDD/Defender) อยู่ระหว่างตรวจสอบ ควรใช้ SSD + UPS |
+
+ตัวเลขความเร็วในหัวข้อ 14.1 และ 14.6 วัดบนเครื่องทดสอบด้วยข้อมูลจำลอง ไม่ใช่เครื่องผลิต
 
 ## 14.1 ผลทดสอบที่อัตราจริง (20 ชิ้น/วินาที, รูป 110 KB)
 
