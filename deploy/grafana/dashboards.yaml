@@ -1,8 +1,0 @@
-# Copy to <grafana>\conf\provisioning\dashboards\ ; put iv4-dashboard.json in the folder below.
-apiVersion: 1
-providers:
-  - name: iv4
-    type: file
-    updateIntervalSeconds: 60
-    options:
-      path: D:\iv4-realtime-analytics\deploy\grafana
