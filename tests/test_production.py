@@ -163,6 +163,8 @@ def test_main_dry_run_via_cli_and_refuses_real_run_off_windows(tmp_path, capsys,
     assert cli.COMMANDS["production"](["--dry-run"], s) == 0
     out = capsys.readouterr().out
     assert "Dry run: nothing was changed" in out and "Firewall" in out and "Still to check" in out
-    assert cli.COMMANDS["production"]([], s) == 1                                    # this test box is not Windows
-    assert "Windows" in capsys.readouterr().out
+    monkeypatch.setattr(production, "is_admin", lambda: False)                       # Windows test box may be elevated
+    assert cli.COMMANDS["production"]([], s) == 1                                    # not Windows, or Windows without admin
+    out = capsys.readouterr().out
+    assert "Windows" in out or "Administrator" in out
     assert isinstance(Path(production.__file__), Path)
