@@ -1575,6 +1575,7 @@ IV4_GDRIVE_FOLDER_ID=<id ของ folder ใน Shared Drive ที่ share �
 * `logs/iv4_agent.log` — rotating log (10 MB × 10 ไฟล์) มี timestamp ทุกบรรทัด
 * `logs/health.json` — heartbeat ทุกรอบ scan: จำนวน processed / pass / fail / errors, ไฟล์ค้างใน incoming, error ล่าสุด
 * `deploy/healthcheck.ps1` — ตรวจ service, heartbeat, backlog, error ใหม่ → เขียน Windows Event Log เมื่อผิดปกติ
+* `deploy/grafana/` + `docs/monitoring.md` — (ตัวเลือก) dashboard Grafana สำเร็จรูปจากตารางสรุปรายชั่วโมง และส่ง heartbeat ไป Uptime Kuma ผ่าน `IV4_KUMA_PUSH_URL` ดูวิธีติดตั้งใน `docs/monitoring.md`
 
 ---
 

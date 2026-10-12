@@ -1,0 +1,9 @@
+# Copy to <grafana>\conf\provisioning\datasources\ and fix the path. Read-only: Grafana never writes the DB.
+apiVersion: 1
+datasources:
+  - name: IV4 SQLite
+    uid: iv4-sqlite
+    type: frser-sqlite-datasource
+    access: proxy
+    jsonData:
+      path: D:\iv4-realtime-analytics\data\database\iv4.db?mode=ro
