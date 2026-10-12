@@ -4,6 +4,10 @@ Version number = `VERSION` file. Show it with `run version`; it also appears in 
 `run status`, the Google Sheets Status tab and `logs/health.json`.
 Rule: x.y.z - z = bug fix, y = new feature (data and settings stay compatible), x = needs manual steps.
 
+## 1.12.0 - 2026-10-12
+- New `run report --excel`: an Excel workbook from the live database with a written summary (findings, low-volume hours, high-NG hours, per-tool NG, drift, next checks), native charts, hourly / daily / per-tool / hour-of-day tables, NG reasons and optional sample NG pictures. Options: `--days N`, `--from/--to`, `--all`, `--images N`, `--lang th|en`, `--out`. Needs `openpyxl` (listed in `requirements-report.txt`, installed automatically on first use).
+- Fix: the Telegram "already sent" memory was pruned with the real clock instead of the tick time (only visible when replaying old dates in tests).
+
 ## 1.11.4 - 2026-10-09
 - Slowdowns now leave evidence: when processing drops below ~4 files/s the agent writes a `[SLOW]` line to `logs\agent.log` (at most every 5 minutes) with the milliseconds per stage and the number of files waiting. The monitor alert now names the slowest step (e.g. `slowest step: db 480 ms/file`).
 

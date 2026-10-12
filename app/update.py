@@ -25,7 +25,7 @@ from pathlib import Path
 from app.config import BASE_DIR, Settings
 
 CODE_DIRS = ("app", "scripts", "deploy", "tests")
-CODE_FILES = ("VERSION", "CHANGELOG.md", "run.bat", "run.sh", "README.md", "requirements.txt", "requirements-dev.txt",
+CODE_FILES = ("VERSION", "CHANGELOG.md", "run.bat", "run.sh", "README.md", "requirements.txt", "requirements-dev.txt", "requirements-report.txt",
               ".env.example", ".gitignore", ".gitattributes")
 SKIP_DIR_NAMES = {"__pycache__", ".pytest_cache"}
 

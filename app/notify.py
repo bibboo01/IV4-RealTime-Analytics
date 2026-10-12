@@ -294,8 +294,8 @@ class NotifyWorker(threading.Thread):
         except (OSError, ValueError):
             return {}
 
-    def _save(self) -> None:
-        cutoff = (self._now() - timedelta(days=3)).isoformat()
+    def _save(self, now: datetime | None = None) -> None:
+        cutoff = ((now or self._now()) - timedelta(days=3)).isoformat()
         self.sent_keys = {k: v for k, v in self.sent_keys.items() if v >= cutoff}
         try:
             self.state_path.write_text(json.dumps({"sent": self.sent_keys}), encoding="utf-8")
@@ -328,7 +328,7 @@ class NotifyWorker(threading.Thread):
             msg = build_message(e.kind, e.shift, e.start_dt, e.end_dt, summary, now, self._health_line())
             if self._post(msg):
                 self.sent_keys[e.key] = now.isoformat()
-                self._save()
+                self._save(now)
 
     def _health_line(self) -> str:
         h = self._health()

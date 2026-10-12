@@ -11,6 +11,7 @@ IV4 Data Agent - one command for everything.
     run lineage             which program version + settings produced the results (history of changes)
     run heal                restart the agent if it is alive but stuck (the health-check task runs this; --dry-run)
     run report [date]       one-page daily report as HTML (reports\\report-<date>.html), good for managers
+    run report --excel      Excel workbook with charts + written summary (--days/--from/--to/--all/--images/--lang)
     run drift               is any tool's score drifting from its last 7 days? (early warning before NG rises)
     run rollback            go back to the version saved before the last update (--list, --dry-run)
     run restart             stop the agent and start it again (also: run reboot; the PC itself is not restarted)

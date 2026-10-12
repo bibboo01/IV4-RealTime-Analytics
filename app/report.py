@@ -1,7 +1,19 @@
 """
 `run report [YYYY-MM-DD] [--out file.html]` - one-page daily report (open in a browser, print to PDF, or send).
+`run report --excel [range]` - Excel workbook with real charts and a written summary.
 
-Default is today. Saved to reports/report-<date>.html next to the program (never touched by run update/clear).
+HTML: default is today. Saved to reports/report-<date>.html next to the program (never touched by run update/clear).
+
+Excel (reports/report-<from>_<to>.xlsx):
+    run report --excel                 the last 7 days (today included)
+    run report --excel 2026-10-09      one day
+    run report --excel --days 30       the last 30 days
+    run report --excel --from 2026-10-01 --to 2026-10-09
+    run report --excel --all           everything recorded
+    options: --images N   put the N newest NG pictures in the file (default 6, 0 = none)
+             --lang en    English text (default: Thai)      --out file.xlsx
+Needs the 'openpyxl' library; it is installed once, the first time (internet needed). It reads the hourly
+tables only, so it is light even on a large database.
 """
 from __future__ import annotations
 
@@ -93,11 +105,81 @@ def _page(day: str, parts: list[str]) -> str:
             f'<style>{CSS}</style></head><body>{"".join(parts)}</body></html>')
 
 
+def _excel(args: list[str], s: Settings, base: Path | None) -> int:
+    from app import report_xlsx
+    from app.database.repository import DatabaseRepository
+    opts = {"days": None, "from": None, "to": None, "images": 6, "lang": "th", "out": None, "all": False, "day": None}
+    it = iter(args)
+    try:
+        for a in it:
+            if a == "--excel":
+                continue
+            if a == "--all":
+                opts["all"] = True
+            elif a in ("--days", "--images"):
+                opts[a[2:]] = int(next(it))
+            elif a in ("--from", "--to", "--lang", "--out"):
+                opts[a[2:]] = next(it)
+            elif a.startswith("--"):
+                print(f"Unknown option {a}")
+                return 2
+            else:
+                opts["day"] = a
+    except (StopIteration, ValueError):
+        print("Missing or invalid value for an option")
+        return 2
+    if opts["lang"] not in report_xlsx.TXT:
+        print("--lang must be th or en")
+        return 2
+    today = datetime.now().date()
+    try:
+        if opts["day"]:
+            d0 = datetime.strptime(opts["day"], "%Y-%m-%d").date()
+            start, end = d0, d0 + timedelta(days=1)
+        elif opts["from"] or opts["to"]:
+            start = datetime.strptime(opts["from"], "%Y-%m-%d").date() if opts["from"] else today - timedelta(days=6)
+            end = (datetime.strptime(opts["to"], "%Y-%m-%d").date() if opts["to"] else today) + timedelta(days=1)
+        elif opts["days"]:
+            start, end = today - timedelta(days=max(opts["days"], 1) - 1), today + timedelta(days=1)
+        else:
+            start, end = today - timedelta(days=6), today + timedelta(days=1)
+    except ValueError:
+        print("Dates must look like 2026-10-08")
+        return 2
+    err = report_xlsx.ensure_openpyxl()
+    if err:
+        print(f"Cannot make the Excel report: {err}")
+        print("Install it by hand with:  python -m pip install openpyxl   (or use the HTML report: run report)")
+        return 1
+    repo = DatabaseRepository(s.database_path)
+    try:
+        if opts["all"]:
+            from sqlalchemy import text
+            with repo.engine.connect() as c:
+                first = c.execute(text("SELECT MIN(hour) FROM hourly_stats")).scalar()
+            start = datetime.strptime(first[:10], "%Y-%m-%d").date() if first else today
+            end = today + timedelta(days=1)
+        a, b = start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
+        data = report_xlsx.collect(repo, s, a, b, images=max(opts["images"], 0))
+    finally:
+        repo.dispose()
+    if not data.hours:
+        print(f"No inspections recorded between {a} and {(end - timedelta(days=1)):%Y-%m-%d}.")
+        return 1
+    last = (end - timedelta(days=1)).strftime("%Y-%m-%d")
+    path = Path(opts["out"]) if opts["out"] else (base or BASE_DIR) / "reports" / f"report-{a}_{last}.xlsx"
+    report_xlsx.write(data, s, path, opts["lang"])
+    print(f"Excel report saved: {path}   ({len(data.hours)} hours, {sum(h.total for h in data.hours):,} inspections)")
+    return 0
+
+
 def run(args: list[str], s: Settings, _running_pid=None, base: Path | None = None) -> int:
     from app.database.repository import DatabaseRepository
     if "-h" in args or "--help" in args:
         print(__doc__)
         return 0
+    if "--excel" in args:
+        return _excel(args, s, base)
     out = None
     rest = []
     it = iter(args)
