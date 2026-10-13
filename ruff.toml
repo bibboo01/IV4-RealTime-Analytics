@@ -1,0 +1,6 @@
+# Lint = bugs only (undefined names, unused imports/variables, syntax). No style rules: they would only add noise.
+line-length = 140
+extend-exclude = [".venv", "data", "logs", "backups"]
+
+[lint]
+select = ["E9", "F"]

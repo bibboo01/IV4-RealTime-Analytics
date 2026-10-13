@@ -6,12 +6,14 @@ IV4 Data Agent - one command for everything.
     run clear               delete collected data to start from zero (agent must be stopped; asks first)
     run update <zip>        install a new version from a downloaded ZIP (no git; keeps .env, data, credentials)
     run update <zip> --restart   safe update: stop, update, self-test, start, watch; goes back by itself if it fails
+    run export-table        every inspection of a day as one flat file (Parquet / gzip CSV) for analysis and training
     run export-dataset <folder>   copy NG + OK images into a versioned, labelled training set (labels.csv, dataset.json)
     run doctor-boot         what happened at the last start (power cut? downtime, recovered files) + database check
     run lineage             which program version + settings produced the results (history of changes)
     run heal                restart the agent if it is alive but stuck (the health-check task runs this; --dry-run)
     run report [date]       one-page daily report as HTML (reports\\report-<date>.html), good for managers
     run report --excel      Excel workbook with charts + written summary (--days/--from/--to/--all/--images/--lang)
+    run quality             is the stored data complete and believable? (stops, lost files, NG spikes, bad values; --days N)
     run drift               is any tool's score drifting from its last 7 days? (early warning before NG rises)
     run rollback            go back to the version saved before the last update (--list, --dry-run)
     run restart             stop the agent and start it again (also: run reboot; the PC itself is not restarted)
@@ -421,6 +423,16 @@ def cmd_drift(args, s: Settings) -> int:
     return drift.run(args, s)
 
 
+def cmd_export_table(args, s: Settings) -> int:
+    from app import export_table
+    return export_table.run(args, s)
+
+
+def cmd_quality(args, s: Settings) -> int:
+    from app import quality
+    return quality.run(args, s)
+
+
 def cmd_report(args, s: Settings) -> int:
     from app import report
     return report.run(args, s)
@@ -538,6 +550,8 @@ COMMANDS = {
     "update": cmd_update,
     "rollback": cmd_rollback,
     "drift": cmd_drift,
+    "quality": cmd_quality,
+    "export-table": cmd_export_table,
     "report": cmd_report,
     "heal": cmd_heal,
     "lineage": cmd_lineage,

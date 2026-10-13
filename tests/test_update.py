@@ -189,3 +189,14 @@ def test_default_smoke_passes_on_the_real_program():
     from pathlib import Path
     ok, msg = update.default_smoke(Path(__file__).resolve().parents[1])
     assert ok, msg
+
+
+def test_sha256_must_match_before_anything_is_installed(setup, capsys):
+    import hashlib
+    inst, zpath, s = setup
+    good = hashlib.sha256(zpath.read_bytes()).hexdigest()
+    assert update.run([str(zpath), "--sha256=" + "0" * 64], s, lambda: None, base=inst) == 2
+    assert "Checksum does not match" in capsys.readouterr().out
+    assert (inst / "app" / "cli.py").read_text() == "v1"                      # nothing changed
+    assert update.run([str(zpath), "--sha256=" + good.upper()], s, lambda: None, base=inst) == 0
+    assert "Checksum OK" in capsys.readouterr().out and (inst / "app" / "cli.py").read_text() == "v2"

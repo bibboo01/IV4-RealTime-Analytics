@@ -4,6 +4,11 @@ Version number = `VERSION` file. Show it with `run version`; it also appears in 
 `run status`, the Google Sheets Status tab and `logs/health.json`.
 Rule: x.y.z - z = bug fix, y = new feature (data and settings stay compatible), x = needs manual steps.
 
+## 1.14.0 - 2026-10-13
+- New `run quality`: automatic data-quality check from the hourly tables (hours with far fewer inspections, files the sensor counted but never sent, unreadable results, NG spikes versus this line's normal, tools missing from some pieces, scores outside 0-100, slow processing, sensor clock ahead). Prints and saves `reports\quality-<date>.txt`; exit code 1 when something needs a look, so a scheduled task can run it. Option `--days N`.
+- New `run export-table`: every inspection of a day as one flat file (Parquet, or gzip CSV with `--format csv`) with `tool<N>_status/value` columns and the program version/settings that produced it, default yesterday, saved to `exports\` (or `--out` a shared drive). Re-runs never overwrite unless `--force`. Parquet needs `pyarrow` (`requirements-export.txt`, installed once on first use; falls back to CSV if it cannot).
+- Release pipeline: pushing a tag `vX.Y.Z` (equal to `VERSION`) runs lint + tests, builds the zip and its SHA-256 and publishes a GitHub release. `run update <zip> --sha256=<hash>` refuses a zip that does not match. CI also runs `ruff` (bug-only rules: undefined names, unused imports).
+
 ## 1.13.0 - 2026-10-13
 - Removed the Telegram integration (`run notify`, shift summaries, Telegram alerts, the power-cut message and the `IV4_TELEGRAM_*`, `IV4_SHIFTS`, `IV4_NOTIFY_*` settings). Alerts are still shown in `run monitor`, `run drift` and `run doctor-boot`. Old `IV4_TELEGRAM_*` lines left in `.env` are ignored and can be deleted. `logs\notify_state.json` is no longer used.
 

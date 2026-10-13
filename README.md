@@ -2,7 +2,7 @@
 
 ระบบสำหรับรับข้อมูล Inspection จาก **KEYENCE IV4 G500CA** แบบอัตโนมัติ โดยรับไฟล์จาก Sensor ได้แก่ Image (`JPG/JPEG`) และข้อมูลผลการตรวจสอบ (`TXT`) จากนั้นทำการจับคู่ข้อมูล, Parse ข้อมูล, วิเคราะห์ผล และบันทึกลงฐานข้อมูล
 
-> **Current Status:** Core Realtime Pipeline พร้อม Production (hardened, 219 automated tests บน Windows/Linux) เวอร์ชัน 1.12.0 — รองรับ sensor หลายตัว, Live monitor ใน terminal, Google Drive + Google Sheets Dashboard, รายงาน HTML/Excel, อัปเดตแบบปลอดภัย + rollback, self-heal, ตรวจ DB หลังไฟดับ, แจ้งเตือน NG/drift/ไฟล์ค้าง, ติดตั้งและรันด้วยคำสั่งเดียว (`run`, `run production`) ประวัติการเปลี่ยนแปลงดู `CHANGELOG.md`  
+> **Current Status:** Core Realtime Pipeline พร้อม Production (hardened, automated tests บน Windows/Linux + lint + release อัตโนมัติ) เวอร์ชัน 1.14.0 — รองรับ sensor หลายตัว, Live monitor ใน terminal, Google Drive + Google Sheets Dashboard, รายงาน HTML/Excel, ตรวจคุณภาพข้อมูล (`run quality`), ส่งออกตารางรายวัน, อัปเดตแบบปลอดภัย + rollback, self-heal, ตรวจ DB หลังไฟดับ, แจ้งเตือน NG/drift/ไฟล์ค้าง, ติดตั้งและรันด้วยคำสั่งเดียว (`run`, `run production`) ประวัติการเปลี่ยนแปลงดู `CHANGELOG.md`  
 > **เริ่มใช้งาน:** ดูหัวข้อ **ติดตั้งและรัน** ด้านล่าง  
 > **Google Drive / Sheets:** พร้อมใช้งาน (ปิดไว้เป็นค่าเริ่มต้น — ตั้ง `IV4_UPLOAD_ENABLED=true` / `IV4_SHEETS_ENABLED=true` ใน `.env` หลังเชื่อมบัญชี)
 
@@ -103,6 +103,8 @@ run production --passive 50000-50100      # ทำจริง (ใส่ช่�
 | `run rollback` | ย้อนกลับเป็นเวอร์ชันก่อน `run update` (ใช้ไฟล์สำรองใน `backups\code-*.zip` ล่าสุด) ไม่แตะ `.env`, `data`, `logs`, `credentials` และสำรองเวอร์ชันปัจจุบันไว้ก่อน สั่งซ้ำ = ยกเลิกการย้อน ตัวเลือก: `--list` `--dry-run` หรือระบุไฟล์ zip (ต้อง `run stop` ก่อน แล้ว `run` ใหม่) |
 | `run report [วันที่]` | สร้างรายงานสรุปรายวันเป็นไฟล์ HTML หน้าเดียว (ยอดตรวจ yield NG% ไฟล์หาย แยกกล้อง แยกชั่วโมง tool ที่ NG มากสุด และข้อควรระวัง) บันทึกที่ `reports\report-วันที่.html` เปิดด้วยเบราว์เซอร์ หรือ Ctrl+P เพื่อบันทึกเป็น PDF ตัวเลือก: `--out ไฟล์.html` |
 | `run report --excel` | สร้างไฟล์ Excel จากข้อมูลจริงใน DB: สรุปละเอียด (ชั่วโมงที่ยอดตก ชั่วโมงที่ NG สูง tool ที่ NG มาก drift ข้อควรตรวจ) + กราฟ + ตารางรายชั่วโมง/วัน/tool/ชั่วโมงของวัน + สาเหตุ NG บันทึกที่ `reports\report-<จาก>_<ถึง>.xlsx` ตัวเลือก: `--days N` (ค่าเริ่มต้น 7) `--from 2026-10-01 --to 2026-10-09` `--all` `--images N` (ฝังรูป NG) `--lang th/en` `--out ไฟล์.xlsx` ครั้งแรกจะติดตั้ง openpyxl เองต้องต่อเน็ต |
+| `run quality` | ตรวจคุณภาพข้อมูลอัตโนมัติจากตารางสรุปรายชั่วโมง: ชั่วโมงที่ยอดต่ำผิดปกติ/ไม่มีข้อมูล, ไฟล์ที่ sensor นับแต่ไม่เคยมาถึง (ชั่วโมงที่ยังไม่จบนับเป็น INFO เพราะอาจเป็นไฟล์ค้าง), ผลที่อ่านไม่ได้, NG พุ่งเทียบกับค่าปกติของไลน์, Tool ที่ขาดบางชิ้น, ค่า score นอก 0-100, เวลาประมวลผลช้า, นาฬิกา sensor เร็วกว่า PC พิมพ์ผลและบันทึก `reports\quality-วันที่.txt` ตัวเลือก: `--days N` `--no-save` exit code 1 เมื่อมีสิ่งที่ต้องดู จึงตั้งเป็นงาน Task Scheduler ได้ |
+| `run export-table` | ส่งออกผลตรวจทุกชิ้นของ 1 วันเป็นไฟล์ตารางเดียว (Parquet หรือ `--format csv` แบบ gzip) มีคอลัมน์ `tool<N>_status/value` และเวอร์ชันโปรแกรม/config ที่สร้างผล ค่าเริ่มต้นคือเมื่อวาน บันทึกที่ `exports\inspections_วันที่.parquet` ตัวเลือก: `--day` `--from/--to` `--out <โฟลเดอร์หรือ NAS>` `--force` รันซ้ำไม่ทับไฟล์เดิม ครั้งแรกจะติดตั้ง pyarrow เอง (ถ้าไม่ได้จะใช้ CSV แทน) ตั้งรันทุกคืนได้: `schtasks /create /tn IV4Export /tr "D:\iv4\run.bat export-table" /sc daily /st 02:30` |
 | `run heal` | รีสตาร์ท agent อัตโนมัติเมื่อโปรแกรมยังรันอยู่แต่ค้าง (heartbeat เก่ากว่า `IV4_HEAL_STALE_SEC` ค่าเริ่มต้น 180 วินาที) งาน health-check ทุก 5 นาทีเรียกคำสั่งนี้ให้เอง จึงไม่ต้องติดตั้งใหม่ แค่ `run update` จำกัด 3 ครั้งต่อชั่วโมง ไม่สตาร์ทตัวที่คุณสั่ง `run stop` ไว้ บันทึกที่ `logs\heal.log` ตัวเลือก `--dry-run` |
 | `run export-dataset <โฟลเดอร์>` | คัดรูปจาก archive ออกเป็นชุดข้อมูลเทรนที่มีเลขเวอร์ชัน: `images\NG`, `images\OK`, `labels.csv`, `dataset.json` (เลขเวอร์ชัน `ds-วันที่-hash`, จำนวน, และ lineage) ค่าเริ่มต้น = NG ทั้งหมด + OK สุ่มจำนวนเท่ากัน ตัวเลือก `--from` `--to` `--sensor` `--ok-per-ng` `--limit` `--dry-run` คัดลอกเท่านั้น ไม่ย้ายหรือลบต้นฉบับ ไม่เขียนทับโฟลเดอร์เดิม |
 | `run lineage` | ดูประวัติว่าผลตรวจแต่ละช่วงมาจากโปรแกรมเวอร์ชันและค่าตั้งอะไร (ทุกผลตรวจเก็บ `app_version` + `config_hash` ตั้งแต่ 1.9.0) และค่าตั้งใดเปลี่ยนระหว่างช่วง |
@@ -121,6 +123,10 @@ run production --passive 50000-50100      # ทำจริง (ใส่ช่�
 1. `run backup` (สำรองก่อน)
 2. ดึงโค้ดใหม่ (`git pull` หรือก๊อปทับ) **โดยไม่ลบ** `.env`, `credentials\`, `data\`, `logs\`, `backups\`
 3. restart agent (หรือรัน `run` ใหม่) — library ถูกติดตั้งใหม่เฉพาะเมื่อ `requirements.txt` เปลี่ยน และ database อัปเกรดโครงสร้างให้เองโดยข้อมูลเดิมอยู่ครบ
+
+**ตรวจ zip ก่อนติดตั้ง:** ถ้ามีไฟล์ `.sha256` ของ release ให้ใช้ `run update <zip> --restart --sha256=<ค่า hash>` ระบบจะไม่ติดตั้งถ้า zip เสียหรือไม่ตรง
+
+**Release อัตโนมัติ (สำหรับผู้พัฒนา):** ติด tag `vX.Y.Z` (ต้องตรงกับไฟล์ `VERSION`) แล้ว push GitHub Actions จะรัน lint + เทสต์ สร้าง zip + SHA-256 และเผยแพร่เป็น release (`.github/workflows/release.yml`)
 
 **Excel report ครั้งแรก:** `run report --excel` จะติดตั้ง `openpyxl` ให้เอง (ต้องต่อเน็ตครั้งเดียว) ตามรายการใน `requirements-report.txt`
 
@@ -313,6 +319,8 @@ iv4-data-agent/
 │   ├── dataset.py           # run export-dataset: คัดรูปเป็นชุดเทรน
 │   ├── report.py            # run report: รายงาน HTML รายวัน (+ ทางเข้า --excel)
 │   ├── report_xlsx.py       # run report --excel: Excel + กราฟ + สรุปละเอียด
+│   ├── quality.py           # run quality: ตรวจคุณภาพข้อมูลอัตโนมัติ
+│   ├── export_table.py      # run export-table: ตารางรายวัน (Parquet/CSV)
 │   ├── clear.py             # run clear: ล้างข้อมูลเริ่มใหม่ (ไม่แตะ .env/credentials)
 │   ├── version.py           # อ่านเลขเวอร์ชันจากไฟล์ VERSION
 │   │
@@ -380,7 +388,7 @@ iv4-data-agent/
 │   ├── test_production.py
 │   ├── test_diagnose.py
 │   ├── test_update.py / test_heal.py / test_boot.py
-│   ├── test_dataset.py / test_report_xlsx.py / test_clear.py
+│   ├── test_dataset.py / test_report_xlsx.py / test_clear.py / test_quality.py / test_export_table.py
 │   └── test_cli.py          # + test_metrics / test_multi_sensor / test_database
 │
 ├── run.bat                  # คำสั่งเดียว (Windows)
@@ -391,6 +399,8 @@ iv4-data-agent/
 ├── CHANGELOG.md             # ประวัติการเปลี่ยนแปลง
 ├── requirements.txt
 ├── requirements-report.txt  # openpyxl (ติดตั้งเองเมื่อใช้ run report --excel)
+├── requirements-export.txt  # pyarrow (ติดตั้งเองเมื่อใช้ run export-table แบบ Parquet)
+├── ruff.toml                # กฎ lint (เฉพาะบั๊ก)
 ├── requirements-dev.txt
 └── README.md
 ```

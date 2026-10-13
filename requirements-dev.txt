@@ -1,3 +1,4 @@
 -r requirements.txt
 -r requirements-report.txt
+-r requirements-export.txt
 pytest>=8

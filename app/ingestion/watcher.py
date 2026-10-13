@@ -32,7 +32,7 @@ from watchdog.observers.polling import PollingObserver
 
 from app.config import Settings, load_settings
 from app.database.repository import DatabaseRepository
-from app.ingestion.lifecycle import move_files, quarantine, rename_or_move, unique_dir
+from app.ingestion.lifecycle import move_files, quarantine, unique_dir
 from app.ingestion.matcher import (
     COMPLETE,
     INVALID,

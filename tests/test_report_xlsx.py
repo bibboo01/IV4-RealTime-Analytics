@@ -1,7 +1,6 @@
 """run report --excel: workbook with charts, rules-based summary, options and failure messages."""
 from datetime import datetime, timedelta
 
-import pytest
 from openpyxl import load_workbook
 from sqlalchemy import text
 
