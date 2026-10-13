@@ -151,3 +151,13 @@ def test_check_without_labels_and_day(settings, tmp_path):
     txt = (tmp_path / "reports" / f"sensor-{d}.txt").read_text(encoding="utf-8")
     assert "Check without labels" in txt and "runs of 20+" in txt
     assert sensor.run(["--day", "13/10"], settings, base=tmp_path) == 2
+
+
+def test_labels_xlsx_without_openpyxl_gives_hint(settings, tmp_path, monkeypatch, capsys):
+    from app import report_xlsx
+    _seed(settings)
+    monkeypatch.setattr(report_xlsx, "ensure_openpyxl", lambda: "no internet")
+    f = tmp_path / "l.xlsx"
+    f.write_bytes(b"x")
+    assert sensor.run(["--labels", str(f)], settings, base=tmp_path) == 2
+    assert "Save it as CSV" in capsys.readouterr().out

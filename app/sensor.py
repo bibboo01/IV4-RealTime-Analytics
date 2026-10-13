@@ -480,7 +480,8 @@ def run(args: list[str], s, _running_pid=None, now: datetime | None = None, base
             if not path:
                 print("No inspections with images to sample in that period (try --days 30).")
                 return 1
-            book = write_label_workbook(path, str(s.archive_dir))
+            from app.report_xlsx import ensure_openpyxl
+            book = write_label_workbook(path, str(s.archive_dir)) if ensure_openpyxl() is None else None
             target = book or path
             print(f"Wrote {n} pieces to {target}\nOpen it, click 'open' to see each image and pick OK or NG in the "
                   f"'truth' column (leave blank to skip), save, then: run sensor --labels \"{target}\"")
@@ -489,6 +490,13 @@ def run(args: list[str], s, _running_pid=None, now: datetime | None = None, base
             if not opt["labels"].exists():
                 print(f"File not found: {opt['labels']}")
                 return 2
+            if opt["labels"].suffix.lower() == ".xlsx":
+                from app.report_xlsx import ensure_openpyxl
+                err = ensure_openpyxl()
+                if err:
+                    print(f"Cannot read .xlsx ({err}). Save it as CSV in Excel (File > Save As > CSV UTF-8) and use "
+                          "that file, or run: .venv\\Scripts\\python -m pip install openpyxl")
+                    return 2
             saved, blank, problems = import_labels(repo, opt["labels"], now)
             print(f"Imported {saved} answers ({blank} blank skipped).")
             for p in problems[:10]:
