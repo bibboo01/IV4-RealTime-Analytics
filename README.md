@@ -103,6 +103,7 @@ run production --passive 50000-50100      # ทำจริง (ใส่ช่�
 | `run rollback` | ย้อนกลับเป็นเวอร์ชันก่อน `run update` (ใช้ไฟล์สำรองใน `backups\code-*.zip` ล่าสุด) ไม่แตะ `.env`, `data`, `logs`, `credentials` และสำรองเวอร์ชันปัจจุบันไว้ก่อน สั่งซ้ำ = ยกเลิกการย้อน ตัวเลือก: `--list` `--dry-run` หรือระบุไฟล์ zip (ต้อง `run stop` ก่อน แล้ว `run` ใหม่) |
 | `run report [วันที่]` | สร้างรายงานสรุปรายวันเป็นไฟล์ HTML หน้าเดียว (ยอดตรวจ yield NG% ไฟล์หาย แยกกล้อง แยกชั่วโมง tool ที่ NG มากสุด และข้อควรระวัง) บันทึกที่ `reports\report-วันที่.html` เปิดด้วยเบราว์เซอร์ หรือ Ctrl+P เพื่อบันทึกเป็น PDF ตัวเลือก: `--out ไฟล์.html` |
 | `run report --excel` | สร้างไฟล์ Excel จากข้อมูลจริงใน DB: สรุปละเอียด (ชั่วโมงที่ยอดตก ชั่วโมงที่ NG สูง tool ที่ NG มาก drift ข้อควรตรวจ) + กราฟ + ตารางรายชั่วโมง/วัน/tool/ชั่วโมงของวัน + สาเหตุ NG บันทึกที่ `reports\report-<จาก>_<ถึง>.xlsx` ตัวเลือก: `--days N` (ค่าเริ่มต้น 7) `--from 2026-10-01 --to 2026-10-09` `--all` `--images N` (ฝังรูป NG) `--lang th/en` `--out ไฟล์.xlsx` ครั้งแรกจะติดตั้ง openpyxl เองต้องต่อเน็ต |
+| `run images [--day วันที่ \| --all]` | ใส่รูปลงโฟลเดอร์ชั่วโมงโดยตรงให้ชิ้นที่เก็บไว้ก่อนเวอร์ชัน 1.17.0 (ชิ้นใหม่ทำให้อัตโนมัติ) เปิด `archive\วันที่\NG\ชั่วโมง` ดูรูป NG ทั้งชั่วโมงได้ทันที ชื่อไฟล์ขึ้นต้นด้วยเวลาและ Tool ที่ NG |
 | `run sensor` | parameter + metrics + accuracy ของ sensor ในคำสั่งเดียว: `--set "ข้อความ"` จดค่าที่ปรับในตัว sensor (แสดง NG% 24 ชม. ก่อน/หลัง), `--days N` metrics ต่อ Tool, `--sample N` สร้าง CSV ชิ้นงานสุ่มให้คนตรวจ แล้วกรอกคอลัมน์ `truth` (OK/NG) และ `--labels ไฟล์.csv` นำเข้า ได้ confusion matrix, false reject, miss และ accuracy ประมาณการ พร้อมช่วงความเชื่อมั่น 95% |
 | `run mail [test]` | แจ้งเตือนทางอีเมล: ดูการตั้งค่า (`run mail`) หรือส่งเมลทดสอบ (`run mail test`) ดูหัวข้อ 22.3 |
 | `run quality` | ตรวจคุณภาพข้อมูลอัตโนมัติจากตารางสรุปรายชั่วโมง: ชั่วโมงที่ยอดต่ำผิดปกติ/ไม่มีข้อมูล, ไฟล์ที่ sensor นับแต่ไม่เคยมาถึง (ชั่วโมงที่ยังไม่จบนับเป็น INFO เพราะอาจเป็นไฟล์ค้าง), ผลที่อ่านไม่ได้, NG พุ่งเทียบกับค่าปกติของไลน์, Tool ที่ขาดบางชิ้น, ค่า score นอก 0-100, เวลาประมวลผลช้า, นาฬิกา sensor เร็วกว่า PC พิมพ์ผลและบันทึก `reports\quality-วันที่.txt` ตัวเลือก: `--days N` `--no-save` exit code 1 เมื่อมีสิ่งที่ต้องดู จึงตั้งเป็นงาน Task Scheduler ได้ |
@@ -321,6 +322,7 @@ iv4-data-agent/
 │   ├── dataset.py           # run export-dataset: คัดรูปเป็นชุดเทรน
 │   ├── report.py            # run report: รายงาน HTML รายวัน (+ ทางเข้า --excel)
 │   ├── report_xlsx.py       # run report --excel: Excel + กราฟ + สรุปละเอียด
+│   ├── gallery.py           # รูปในโฟลเดอร์ชั่วโมง (hard link) + run images
 │   ├── sensor.py            # run sensor: parameter, metrics, accuracy
 │   ├── mailer.py            # แจ้งเตือนทางอีเมล (SMTP)
 │   ├── quality.py           # run quality: ตรวจคุณภาพข้อมูลอัตโนมัติ
