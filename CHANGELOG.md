@@ -4,6 +4,9 @@ Version number = `VERSION` file. Show it with `run version`; it also appears in 
 `run status`, the Google Sheets Status tab and `logs/health.json`.
 Rule: x.y.z - z = bug fix, y = new feature (data and settings stay compatible), x = needs manual steps.
 
+## 1.18.2 - 2026-10-13
+- `run sensor --sample`: `truth` is pre-filled when every tool agrees with the sensor; rows where they differ stay blank with `filled_by` = REVIEW (the Excel file has a filter on the header). Pre-filled rows are the sensor's own answer, so spot-check some of them too.
+
 ## 1.18.1 - 2026-10-13
 - Fix: `run sensor --labels file.xlsx` crashed with "No module named 'openpyxl'" on machines without it. It now installs openpyxl once (like `run report --excel`), or says to save the file as CSV. `--sample` does the same before writing the Excel file.
 

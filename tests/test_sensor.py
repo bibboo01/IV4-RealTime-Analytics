@@ -38,7 +38,7 @@ def test_sample_labels_and_weighted_accuracy(settings, tmp_path):
     path, n = sensor.make_sample(repo, 40, 7, TODAY, seed=1, base=tmp_path)
     assert n == 40
     rows = list(csv.DictReader(open(path, encoding="utf-8-sig")))
-    assert sum(r["sensor_result"] == "NG" for r in rows) == 20 and all(r["truth"] == "" for r in rows)
+    assert sum(r["sensor_result"] == "NG" for r in rows) == 20 and all(r["truth"] == r["sensor_result"] and r["filled_by"].startswith("auto") for r in rows)
     # a person checks: 2 of the 20 sensor-NG were really OK; 1 of the 20 sensor-OK was really NG
     fr = miss = 0
     for r in rows:
@@ -161,3 +161,12 @@ def test_labels_xlsx_without_openpyxl_gives_hint(settings, tmp_path, monkeypatch
     f.write_bytes(b"x")
     assert sensor.run(["--labels", str(f)], settings, base=tmp_path) == 2
     assert "Save it as CSV" in capsys.readouterr().out
+
+
+def test_prefill_only_when_tools_agree():
+    ok, ng = {"status": "OK"}, {"status": "NG"}
+    assert sensor.prefill("OK", {1: ok, 2: ok}) == ("auto: tools agree", "OK")
+    assert sensor.prefill("NG", {1: ng, 2: ng}) == ("auto: tools agree", "NG")
+    assert sensor.prefill("NG", {1: ng, 2: ok}) == ("REVIEW", "")
+    assert sensor.prefill("NG", {1: ok, 2: ok}) == ("REVIEW", "")      # tools fine but sensor said NG: look at it
+    assert sensor.prefill("OK", {}) == ("REVIEW", "")

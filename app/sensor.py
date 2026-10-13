@@ -27,7 +27,7 @@ from sqlalchemy import text
 from app.config import BASE_DIR
 
 HEADER = ["uid", "timestamp", "sensor", "program", "trigger_no", "time_ms", "sensor_result", "score", "failing_tools"]
-TAIL = ["image_file", "folder", "truth"]
+TAIL = ["image_file", "folder", "filled_by", "truth"]
 
 
 def _hour(d: datetime) -> str:
@@ -205,6 +205,15 @@ def check_section(repo, now: datetime, day: datetime | None) -> list[str]:
 # labels and accuracy
 # ------------------------------------------------------------------
 
+def prefill(sensor_result: str, tools: dict) -> tuple[str, str]:
+    """(filled_by, truth): when every tool agrees with each other and with the sensor, pre-fill that answer so a
+    person only has to look at the rest. It is still the sensor's own answer - spot-check some of these too."""
+    st = {str(x.get("status")).upper() for x in tools.values()}
+    if len(st) == 1 and st.pop() == sensor_result:
+        return "auto: tools agree", sensor_result
+    return "REVIEW", ""
+
+
 def make_sample(repo, n: int, days: int, now: datetime, seed: int | None = None, base: Path | None = None,
                 day: datetime | None = None) -> tuple[Path | None, int]:
     """Half sensor-OK, half sensor-NG, random, not yet labelled. Returns (file, rows)."""
@@ -251,7 +260,7 @@ def make_sample(repo, n: int, days: int, now: datetime, seed: int | None = None,
         w.writerow(head)
         for *cols, tools, img, folder in parsed:
             extra = [v for n in nos for v in ((tools.get(n) or {}).get("status"), (tools.get(n) or {}).get("value"))]
-            w.writerow(cols + extra + [img, folder, ""])
+            w.writerow(cols + extra + [img, folder, *prefill(cols[6], tools)])
     return path, len(rows)
 
 
@@ -286,6 +295,7 @@ def write_label_workbook(csv_path: Path, archive_dir: str) -> Path | None:
     for i in range(2, len(rows) + 1):
         ws[f"{col}{i}"].fill = PatternFill("solid", fgColor="FFF2CC")
     ws.freeze_panes = "B2"
+    ws.auto_filter.ref = ws.dimensions
     out = csv_path.with_suffix(".xlsx")
     wb.save(out)
     return out
@@ -483,8 +493,8 @@ def run(args: list[str], s, _running_pid=None, now: datetime | None = None, base
             from app.report_xlsx import ensure_openpyxl
             book = write_label_workbook(path, str(s.archive_dir)) if ensure_openpyxl() is None else None
             target = book or path
-            print(f"Wrote {n} pieces to {target}\nOpen it, click 'open' to see each image and pick OK or NG in the "
-                  f"'truth' column (leave blank to skip), save, then: run sensor --labels \"{target}\"")
+            print(f"Wrote {n} pieces to {target}\n'truth' is pre-filled where all tools agree; filter "
+                  f"'filled_by' = REVIEW, click 'open' to see each image and pick OK or NG (blank = skip), save, then: run sensor --labels \"{target}\"")
             return 0
         if opt["labels"]:
             if not opt["labels"].exists():
