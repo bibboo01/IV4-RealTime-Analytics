@@ -103,3 +103,24 @@ def test_sample_has_every_value_the_sensor_sends(settings, tmp_path):
     rows = list(csv.DictReader(open(path, encoding="utf-8-sig")))
     assert {"program", "trigger_no", "time_ms", "tool1_status", "tool1_value", "folder", "truth"} <= set(rows[0])
     assert {r["tool1_value"] for r in rows} == {"40", "99"}
+
+
+def test_label_workbook_has_image_links_and_imports_back(settings, tmp_path):
+    from openpyxl import load_workbook
+    _seed(settings)
+    _pieces(settings, 3, 3)
+    repo = DatabaseRepository(settings.database_path)
+    path, n = sensor.make_sample(repo, 6, 7, TODAY, seed=3, base=tmp_path)
+    book = sensor.write_label_workbook(path, r"D:\iv4\data\archive")
+    wb = load_workbook(book)
+    ws = wb.active
+    assert ws["A2"].value.startswith('=HYPERLINK("D:\\iv4\\data\\archive\\') and ws["A2"].value.endswith('.jpg","open")')
+    assert ws.data_validations.dataValidation[0].formula1 == '"OK,NG"'
+    head = [c.value for c in ws[1]]
+    col = head.index("truth") + 1
+    for i in range(2, ws.max_row + 1):
+        ws.cell(i, col, "NG" if ws.cell(i, head.index("sensor_result") + 1).value == "NG" else "OK")
+    wb.save(book)
+    saved, blank, problems = sensor.import_labels(repo, book, TODAY)
+    repo.dispose()
+    assert (saved, blank, problems) == (6, 0, [])

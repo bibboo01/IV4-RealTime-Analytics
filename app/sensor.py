@@ -168,15 +168,67 @@ def make_sample(repo, n: int, days: int, now: datetime, seed: int | None = None,
     return path, len(rows)
 
 
+def write_label_workbook(csv_path: Path, archive_dir: str) -> Path | None:
+    """Same rows as the CSV, as Excel: a link that opens each image and an OK/NG drop-down in 'truth'."""
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill
+        from openpyxl.worksheet.datavalidation import DataValidation
+    except ImportError:
+        return None
+    with open(csv_path, newline="", encoding="utf-8-sig") as fh:
+        rows = list(csv.reader(fh))
+    if not rows:
+        return None
+    head = rows[0]
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "label"
+    ws.append(["open image"] + head)
+    for c in ws[1]:
+        c.font = Font(bold=True)
+    fi, ii, ti = head.index("folder"), head.index("image_file"), head.index("truth")
+    sep = "\\" if "\\" in archive_dir or ":" in archive_dir[:3] else "/"
+    for r in rows[1:]:
+        target = archive_dir.rstrip("/\\") + sep + r[fi].replace("/", sep) + sep + r[ii]
+        ws.append([f'=HYPERLINK("{target}","open")'] + [(_num(v)) for v in r])
+    col = chr(ord("A") + ti + 1)
+    dv = DataValidation(type="list", formula1='"OK,NG"', allow_blank=True)
+    ws.add_data_validation(dv)
+    dv.add(f"{col}2:{col}{len(rows)}")
+    for i in range(2, len(rows) + 1):
+        ws[f"{col}{i}"].fill = PatternFill("solid", fgColor="FFF2CC")
+    ws.freeze_panes = "B2"
+    out = csv_path.with_suffix(".xlsx")
+    wb.save(out)
+    return out
+
+
+def _num(v: str):
+    try:
+        return int(v) if v.isdigit() else float(v) if v.replace(".", "", 1).isdigit() else v
+    except ValueError:
+        return v
+
+
+def _read_rows(path: Path) -> list[dict]:
+    if path.suffix.lower() == ".xlsx":
+        from openpyxl import load_workbook
+        ws = load_workbook(path, read_only=True, data_only=True).worksheets[0]
+        it = ws.iter_rows(values_only=True)
+        head = [str(h or "") for h in next(it, [])]
+        return [{h: ("" if v is None else str(v)) for h, v in zip(head, r)} for r in it if any(v is not None for v in r)]
+    with open(path, newline="", encoding="utf-8-sig") as fh:
+        return list(csv.DictReader(fh))
+
+
 def import_labels(repo, path: Path, now: datetime) -> tuple[int, int, list[str]]:
     """(saved, skipped_blank, problems). truth must be OK or NG; unknown uids are reported."""
     saved = blank = 0
     problems: list[str] = []
-    with open(path, newline="", encoding="utf-8-sig") as fh:
-        reader = csv.DictReader(fh)
-        if not reader.fieldnames or "uid" not in reader.fieldnames or "truth" not in reader.fieldnames:
-            return 0, 0, ["the file needs the columns 'uid' and 'truth' (use the file from --sample)"]
-        rows = list(reader)
+    rows = _read_rows(path)
+    if not rows or "uid" not in rows[0] or "truth" not in rows[0]:
+        return 0, 0, ["the file needs the columns 'uid' and 'truth' (use the file from --sample)"]
     with repo.engine.begin() as c:
         known = {r[0] for r in c.execute(text("SELECT uid FROM inspection"))}
         for i, r in enumerate(rows, start=2):
@@ -306,8 +358,10 @@ def run(args: list[str], s, _running_pid=None, now: datetime | None = None, base
             if not path:
                 print("No inspections with images to sample in that period (try --days 30).")
                 return 1
-            print(f"Wrote {n} pieces to {path}\nOpen it, look at each image_file and type OK or NG in the 'truth' column "
-                  f"(leave blank to skip), then: run sensor --labels \"{path}\"")
+            book = write_label_workbook(path, str(s.archive_dir))
+            target = book or path
+            print(f"Wrote {n} pieces to {target}\nOpen it, click 'open' to see each image and pick OK or NG in the "
+                  f"'truth' column (leave blank to skip), save, then: run sensor --labels \"{target}\"")
             return 0
         if opt["labels"]:
             if not opt["labels"].exists():
