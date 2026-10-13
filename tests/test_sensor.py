@@ -130,3 +130,24 @@ def test_label_workbook_has_image_links_and_imports_back(settings, tmp_path):
     saved, blank, problems = sensor.import_labels(repo, book, TODAY)
     repo.dispose()
     assert (saved, blank, problems) == (6, 0, [])
+
+
+def test_check_without_labels_and_day(settings, tmp_path):
+    _seed(settings)
+    _pieces(settings, 60, 60)                                      # 60 OK then 60 NG in a row
+    repo = DatabaseRepository(settings.database_path)
+    r = sensor.check_without_labels(repo, TODAY, TODAY - timedelta(hours=2))
+    assert r["n"] == 120 and r["ng"] == 60 and r["run_ng"] == 60 and r["runs"] == 1
+    assert r["only"]["T1"] == 60 and r["near"] == 0 and r["normal_hours"] == 0
+    other = sensor.check_without_labels(repo, TODAY, TODAY - timedelta(days=3))
+    assert other is None
+    path, n = sensor.make_sample(repo, 10, 7, TODAY, seed=1, base=tmp_path, day=TODAY - timedelta(days=3))
+    assert path is None
+    path, n = sensor.make_sample(repo, 10, 7, TODAY, seed=1, base=tmp_path, day=TODAY - timedelta(hours=2))
+    assert n == 10
+    repo.dispose()
+    d = (TODAY - timedelta(hours=2)).strftime("%Y-%m-%d")
+    assert sensor.run(["--day", d], settings, base=tmp_path, now=TODAY) == 0
+    txt = (tmp_path / "reports" / f"sensor-{d}.txt").read_text(encoding="utf-8")
+    assert "Check without labels" in txt and "runs of 20+" in txt
+    assert sensor.run(["--day", "13/10"], settings, base=tmp_path) == 2
