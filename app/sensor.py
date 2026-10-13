@@ -25,7 +25,8 @@ from sqlalchemy import text
 
 from app.config import BASE_DIR
 
-HEADER = ["uid", "timestamp", "sensor", "sensor_result", "score", "failing_tools", "image_file", "truth"]
+HEADER = ["uid", "timestamp", "sensor", "program", "trigger_no", "time_ms", "sensor_result", "score", "failing_tools"]
+TAIL = ["image_file", "folder", "truth"]
 
 
 def _hour(d: datetime) -> str:
@@ -134,7 +135,8 @@ def make_sample(repo, n: int, days: int, now: datetime, seed: int | None = None,
         rows = []
         for i in range(0, len(picked), 500):
             chunk = picked[i:i + 500]
-            q = text("SELECT uid, timestamp, camera_id, analysis_status, score, tools_json, image_file FROM inspection"
+            q = text("SELECT uid, timestamp, camera_id, analysis_status, score, tools_json, image_file, program_no,"
+                     " trigger_no, inspection_time_ms, folder FROM inspection"
                      f" WHERE id IN ({','.join(str(int(x)) for x in chunk)})")
             rows += list(c.execute(q))
     if not rows:
@@ -143,15 +145,26 @@ def make_sample(repo, n: int, days: int, now: datetime, seed: int | None = None,
     out = (base or BASE_DIR) / "reports"
     out.mkdir(exist_ok=True)
     path = out / f"label_sample_{now:%Y-%m-%d_%H%M}.csv"
+    parsed = []
+    tool_cols: dict[int, str] = {}
+    for uid, ts, cam, st, score, tj, img, prog, trig, ms, folder in rows:
+        try:
+            tools = json.loads(tj or "[]")
+        except ValueError:
+            tools = []
+        for x in tools:
+            tool_cols.setdefault(int(x.get("no", 0)), x.get("name") or "")
+        parsed.append((uid, ts, cam, prog, trig, ms, "OK" if st == "PASS" else "NG", score,
+                       ",".join(f"T{x['no']}" for x in tools if str(x.get("status")).upper() == "NG"),
+                       {int(x.get("no", 0)): x for x in tools}, img, folder))
+    nos = sorted(tool_cols)
+    head = HEADER + [c for n in nos for c in (f"tool{n}_status", f"tool{n}_value")] + TAIL
     with open(path, "w", newline="", encoding="utf-8-sig") as fh:
         w = csv.writer(fh)
-        w.writerow(HEADER)
-        for uid, ts, cam, st, score, tj, img in rows:
-            try:
-                bad = ",".join(f"T{t['no']}" for t in json.loads(tj or "[]") if str(t.get("status")).upper() == "NG")
-            except (ValueError, TypeError, KeyError):
-                bad = ""
-            w.writerow([uid, ts, cam, "OK" if st == "PASS" else "NG", score, bad, img, ""])
+        w.writerow(head)
+        for *cols, tools, img, folder in parsed:
+            extra = [v for n in nos for v in ((tools.get(n) or {}).get("status"), (tools.get(n) or {}).get("value"))]
+            w.writerow(cols + extra + [img, folder, ""])
     return path, len(rows)
 
 
@@ -222,6 +235,14 @@ def accuracy(repo) -> dict | None:
             wrong = p_ok * cm[("OK", "NG")] / n_ok + p_ng * cm[("NG", "OK")] / n_ng
             res["weighted"] = 1 - wrong / (p_ok + p_ng)
             res["pop"] = (p_ok, p_ng)
+            # NG = the positive class. Precision: of what it rejected, how much was really NG.
+            # Recall: of all really-NG pieces (estimated for the whole period), how many it caught.
+            true_ng = p_ng * cm[("NG", "NG")] / n_ng
+            missed = p_ok * cm[("OK", "NG")] / n_ok
+            res["precision"] = cm[("NG", "NG")] / n_ng
+            res["recall"] = true_ng / (true_ng + missed) if true_ng + missed else None
+            if res["recall"] is not None and res["precision"] + res["recall"]:
+                res["f1"] = 2 * res["precision"] * res["recall"] / (res["precision"] + res["recall"])
     return res
 
 
@@ -239,6 +260,9 @@ def accuracy_section(repo) -> list[str]:
            f"  Missed defect (sensor OK, truth NG): {_pct(cm[('OK', 'NG')], acc['n_sensor_ok'])}   of the pieces it passed"]
     if acc["weighted"] is not None:
         out.append(f"  Estimated accuracy on all {sum(acc['pop']):,} pieces of that period: {100 * acc['weighted']:.2f}%")
+        if acc.get("recall") is not None:
+            out.append(f"  Precision (NG it rejected that were really NG): {100 * acc['precision']:.1f}%   "
+                       f"Recall (real NG it caught): {100 * acc['recall']:.1f}%   F1: {100 * acc.get('f1', 0):.1f}%")
     if acc["fr_tools"]:
         out.append("  False rejects by failing tool: " + ", ".join(f"{k} x{v}" for k, v in acc["fr_tools"].most_common(5)))
     if acc["n_sensor_ng"] < 30 or acc["n_sensor_ok"] < 30:

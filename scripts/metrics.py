@@ -17,7 +17,7 @@ from datetime import date, timedelta
 
 from app.config import load_settings
 from app.database.repository import DatabaseRepository
-from app.metrics import summarize, tool_summary
+from app.metrics import summarize, tool_columns, tool_summary
 
 
 def _fmt(v, suffix=""):
@@ -55,6 +55,8 @@ def main() -> None:
         rows = summarize(repo, a.start, a.end, by=a.by, program_no=a.program,
                          sensor_id=a.sensor, per_sensor=a.per_sensor)
         tools = tool_summary(repo, a.start, a.end, program_no=a.program, sensor_id=a.sensor, per_sensor=True)
+        tool_cols, per_tool = tool_columns(repo, a.start, a.end, by=a.by, program_no=a.program,
+                                           sensor_id=a.sensor, per_sensor=a.per_sensor)
     finally:
         repo.dispose()
 
@@ -82,10 +84,10 @@ def main() -> None:
 
     if a.csv:
         with open(a.csv, "w", newline="", encoding="utf-8-sig") as fh:
-            w = csv.DictWriter(fh, fieldnames=list(rows[0].to_dict()) if rows else ["period"])
+            w = csv.DictWriter(fh, fieldnames=(list(rows[0].to_dict()) + tool_cols) if rows else ["period"])
             w.writeheader()
             for r in rows:
-                w.writerow(r.to_dict())
+                w.writerow({**r.to_dict(), **per_tool.get((r.period, r.sensor_id), {})})
         print(f"\nCSV written: {a.csv}")
 
 

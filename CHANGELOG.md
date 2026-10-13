@@ -4,6 +4,15 @@ Version number = `VERSION` file. Show it with `run version`; it also appears in 
 `run status`, the Google Sheets Status tab and `logs/health.json`.
 Rule: x.y.z - z = bug fix, y = new feature (data and settings stay compatible), x = needs manual steps.
 
+## 1.17.3 - 2026-10-13
+- `run sensor` accuracy section adds Precision, Recall and F1 (NG = positive class), with recall estimated for the whole period from the labelled sample.
+
+## 1.17.2 - 2026-10-13
+- `run metrics --csv` adds per-tool columns for every period: `tool<N>_ng`, `tool<N>_ng_pct`, `tool<N>_avg_value`, `tool<N>_min_value`, `tool<N>_min_ok_value`, so the CSV shows which tool caused the NG of each hour/day.
+
+## 1.17.1 - 2026-10-13
+- `run sensor --sample` CSV now carries everything the sensor sends per piece: program, trigger number, processing time (ms), and status + value of every tool (`tool1_status`, `tool1_value`, ...), plus the archive folder of the image.
+
 ## 1.17.0 - 2026-10-13
 - Easy image browsing: every archived image now also appears directly in its hour folder, e.g. `archive\2026-10-13\NG\09\091503_T1_00292_13102026_091503.jpg` (time first so it sorts, then the failing tool for NG). Open `NG\<hour>` (or `OK\<hour>`) and see all images without opening one folder per piece. It is a hard link: no extra disk space (Explorer may still count it twice); retention and disk pruning remove it with the hour. On a disk that cannot hard-link, NG images are copied and OK images skipped. Off with `IV4_FLAT_IMAGES=false`.
 - New `run images [--day YYYY-MM-DD | --all]` adds them for pieces archived before this version (default today).

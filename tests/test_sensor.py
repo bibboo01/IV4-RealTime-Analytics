@@ -59,6 +59,9 @@ def test_sample_labels_and_weighted_accuracy(settings, tmp_path):
     want = 1 - (p_ok * 1 / 20 + p_ng * 2 / 20) / (p_ok + p_ng)
     assert abs(acc["weighted"] - want) < 1e-9 and acc["weighted"] > 0.9
     assert acc["fr_tools"]["T1"] == 2
+    assert abs(acc["precision"] - 18 / 20) < 1e-9
+    true_ng, missed = p_ng * 18 / 20, p_ok * 1 / 20
+    assert abs(acc["recall"] - true_ng / (true_ng + missed)) < 1e-9 and 0 < acc["f1"] < 1
     repo.dispose()
 
 
@@ -89,3 +92,14 @@ def test_notes_show_before_after_and_report_runs(settings, tmp_path, capsys):
     assert "Lowest OK" in out and "no checked pieces yet" in out and "AI Differentiate" in out
     assert (tmp_path / "reports").exists()
     assert sensor.run(["--bogus"], settings, base=tmp_path) == 2
+
+
+def test_sample_has_every_value_the_sensor_sends(settings, tmp_path):
+    _seed(settings)
+    _pieces(settings, 3, 3)
+    repo = DatabaseRepository(settings.database_path)
+    path, n = sensor.make_sample(repo, 6, 7, TODAY, seed=2, base=tmp_path)
+    repo.dispose()
+    rows = list(csv.DictReader(open(path, encoding="utf-8-sig")))
+    assert {"program", "trigger_no", "time_ms", "tool1_status", "tool1_value", "folder", "truth"} <= set(rows[0])
+    assert {r["tool1_value"] for r in rows} == {"40", "99"}
