@@ -107,6 +107,26 @@ class ConfigHistory(Base):
     settings_json: Mapped[str] = mapped_column(Text, nullable=False)
 
 
+class SensorLabel(Base):
+    """Ground truth for one inspection, given by a person (run sensor --labels): the only way to measure accuracy."""
+
+    __tablename__ = "sensor_label"
+
+    uid: Mapped[str] = mapped_column(String(150), primary_key=True)
+    truth: Mapped[str] = mapped_column(String(4), nullable=False)          # OK | NG
+    labeled_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
+class SensorNote(Base):
+    """A change made on the sensor (threshold, light, program) written down by a person: run sensor --set."""
+
+    __tablename__ = "sensor_note"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    at: Mapped[str] = mapped_column(String(19), nullable=False)             # sensor-local 'YYYY-MM-DD HH:MM:SS'
+    text: Mapped[str] = mapped_column(String(500), nullable=False)
+
+
 class HourlyStats(Base):
     """
     One row per (hour, program, sensor). Updated in the same transaction as
