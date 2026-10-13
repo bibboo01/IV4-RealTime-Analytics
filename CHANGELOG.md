@@ -4,6 +4,13 @@ Version number = `VERSION` file. Show it with `run version`; it also appears in 
 `run status`, the Google Sheets Status tab and `logs/health.json`.
 Rule: x.y.z - z = bug fix, y = new feature (data and settings stay compatible), x = needs manual steps.
 
+## 1.16.0 - 2026-10-13
+- New `run sensor`: one command for the sensor's parameters, metrics and accuracy. Prints and saves `reports\sensor-<date>.txt`:
+  1. Parameters: `--set "Tool1 threshold 70->65"` writes down a change made on the sensor (the sensor's own settings are not in its files); each change is shown with NG% for 24 h before and after.
+  2. Metrics per tool (`--days N`): inspections, NG%, average value, lowest value, lowest value still passed (shows where the pass line sits).
+  3. Accuracy: the sensor cannot know if its OK/NG was right, so a person checks a sample. `--sample N` writes a CSV of N random pieces (half sensor-OK, half sensor-NG, with the image name); fill the `truth` column with OK/NG; `--labels file.csv` imports it. Reports the confusion matrix, false-reject and missed-defect rates with 95% ranges, false rejects by tool, and estimated accuracy re-weighted to the real OK/NG totals.
+  New tables `sensor_label` and `sensor_note` are added automatically; existing data is untouched.
+
 ## 1.15.0 - 2026-10-13
 - New email alerts (SMTP, standard library only). Turn on with `IV4_EMAIL_ENABLED=true` and the `IV4_EMAIL_*` settings in `.env`. The agent checks every 30 s and sends ONE mail for everything new: no files for N minutes, files missing this hour, NG above `IV4_NG_ALERT_PCT`, score drift, backlog, low disk, Google Drive/Sheets errors; plus one mail when the PC came back after a power cut or restart. The same alert repeats at most every `IV4_EMAIL_COOLDOWN_MIN` (kept across restarts in `logs\mail_state.json`). A failed send is retried at the next check. The password is only in `.env` and never logged.
 - New `run mail` (settings and what is missing) and `run mail test` (sends a test mail and explains login/port/firewall failures). `run check` warns when email is off or incomplete. `logs\health.json` has an `email` block.

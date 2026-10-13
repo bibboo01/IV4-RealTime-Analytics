@@ -27,6 +27,7 @@ IV4 Data Agent - one command for everything.
     run upload              why isn't it uploading to Google Drive? (diagnosis)
     run gdrive-switch       change Google account (forget the old one, sign in again)
     run gdrive-logout       forget the Google account
+    run sensor              sensor parameters, per-tool metrics and accuracy (--sample / --labels / --set)
     run mail [test]         email alerts: settings, and send a test mail
     run sheets              publish the Google Sheets dashboard once and print its link
     run backup              online database backup
@@ -447,6 +448,11 @@ def cmd_mail(args, s: Settings) -> int:
     return mailer.run(args, s)
 
 
+def cmd_sensor(args, s: Settings) -> int:
+    from app import sensor
+    return sensor.run(args, s)
+
+
 def cmd_report(args, s: Settings) -> int:
     from app import report
     return report.run(args, s)
@@ -566,6 +572,7 @@ COMMANDS = {
     "drift": cmd_drift,
     "quality": cmd_quality,
     "mail": cmd_mail,
+    "sensor": cmd_sensor,
     "export-table": cmd_export_table,
     "report": cmd_report,
     "heal": cmd_heal,
