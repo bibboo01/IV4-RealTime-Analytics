@@ -336,13 +336,17 @@ class IV4Agent:
         if size and p.analysis.status == "PASS" and p.manifest.get("image"):
             shrink_image(p.folder / p.manifest["image"], size, self.settings.resize_quality)
         save_manifest(p.manifest, p.folder)
-        self._archive(p.folder, p.manifest)
+        target = self._archive(p.folder, p.manifest)
+        if target is not None and self.settings.flat_images:
+            from app import gallery
+            gallery.link(target, p.manifest.get("image"), p.record.timestamp, p.record.tools,
+                         p.analysis.status != "PASS")
 
     # ------------------------------------------------------------
     # Recovery: processing/ folders left CLAIMED (crash / DB down)
     # ------------------------------------------------------------
 
-    def _archive(self, folder: Path, manifest: dict) -> None:
+    def _archive(self, folder: Path, manifest: dict) -> Path | None:
         """processing/<uid>/ -> archive/<date>/<OK|NG|UNKNOWN>/<uid>/ (keeps processing/ small)."""
         rel = manifest.get("archive")
         if not rel:
@@ -367,6 +371,8 @@ class IV4Agent:
                 shutil.move(str(folder), str(target))    # other disk, or the rename failed: copy+delete
         except OSError as exc:
             log.warning("[ARCHIVE] uid=%s will retry: %s", manifest.get("uid"), exc)
+            return None
+        return target
 
     def recover_processing(self) -> int:
         """Finish anything left in processing/ (crash, DB down, archive move failed)."""
