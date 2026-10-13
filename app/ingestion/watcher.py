@@ -101,6 +101,7 @@ class IV4Agent:
         self.wake = threading.Event()
         self.upload_worker = None
         self.sheets_worker = None
+        self.mail_worker = None
         self.maintenance = None
         self.pool = ThreadPoolExecutor(max_workers=settings.worker_count(), thread_name_prefix="iv4-worker")
         self._last_retry = 0.0
@@ -443,6 +444,10 @@ class IV4Agent:
                 {"enabled": True, **self.sheets_worker.stats}
                 if self.sheets_worker else {"enabled": False}
             ),
+            "email": (
+                {"enabled": True, **self.mail_worker.stats}
+                if self.mail_worker else {"enabled": False}
+            ),
         }
         path = self.settings.log_dir / "health.json"
         tmp = path.with_suffix(".tmp")
@@ -506,6 +511,16 @@ class IV4Agent:
             self.sheets_worker = SheetsWorker(s, self.stop_event)
             self.sheets_worker.start()
 
+        if s.email_enabled:
+            from app import mailer
+
+            miss = mailer.missing_settings(s)
+            if miss:
+                log.warning("[MAIL] email alerts are ON but not set up: %s", ", ".join(miss))
+            else:
+                self.mail_worker = mailer.MailWorker(s, self.stop_event)
+                self.mail_worker.start()
+
         stop_flag = s.log_dir / STOP_FLAG
         stop_flag.unlink(missing_ok=True)      # leftover from an earlier `run stop`
         try:
@@ -534,6 +549,8 @@ class IV4Agent:
                 self.upload_worker.join(timeout=30)
             if self.sheets_worker is not None:
                 self.sheets_worker.join(timeout=30)
+            if self.mail_worker is not None:
+                self.mail_worker.join(timeout=30)
             if self.maintenance is not None:
                 self.maintenance.join(timeout=30)
             self.write_health()

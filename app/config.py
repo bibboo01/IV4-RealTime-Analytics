@@ -118,6 +118,20 @@ class Settings:
     heal_stale_sec: int = 180           # run heal restarts an agent whose heartbeat is older than this
     drift_min: int = 200                # ...with at least this many recent inspections of that tool
 
+    # Email alerts (SMTP). The password lives only in .env.
+    email_enabled: bool = False
+    email_host: str = ""
+    email_port: int = 587
+    email_security: str = "starttls"    # starttls (587) | ssl (465) | none (25, internal relay)
+    email_user: str = ""
+    email_password: str = ""
+    email_from: str = ""                # empty = the user name
+    email_to: tuple[str, ...] = ()
+    email_cooldown_min: int = 60        # the same alert is repeated at most this often
+    email_no_data_min: int = 10         # alert when no inspection arrived for this many minutes
+    email_missing_min: int = 20         # alert when this many files went missing in the current hour
+    email_backlog: int = 500            # alert when this many files wait to be processed
+
     # Logging
     log_level: str = "INFO"
     log_max_bytes: int = 10 * 1024 * 1024
@@ -273,6 +287,18 @@ def load_settings(
         drift_pct=max(_f("DRIFT_PCT", "10"), 0.0),
         drift_min=max(_i("DRIFT_MIN", "200"), 1),
         heal_stale_sec=max(_i("HEAL_STALE_SEC", "180"), 60),
+        email_enabled=get("EMAIL_ENABLED", "false").lower() in {"1", "true", "yes"},
+        email_host=get("EMAIL_SMTP_HOST", "").strip(),
+        email_port=_i("EMAIL_SMTP_PORT", "587"),
+        email_security=get("EMAIL_SECURITY", "starttls").strip().lower(),
+        email_user=get("EMAIL_USER", "").strip(),
+        email_password=get("EMAIL_PASSWORD", ""),
+        email_from=get("EMAIL_FROM", "").strip(),
+        email_to=tuple(a.strip() for a in re.split(r"[;,]", get("EMAIL_TO", "")) if a.strip()),
+        email_cooldown_min=max(_i("EMAIL_COOLDOWN_MIN", "60"), 1),
+        email_no_data_min=max(_i("EMAIL_NO_DATA_MIN", "10"), 1),
+        email_missing_min=max(_i("EMAIL_MISSING_MIN", "20"), 1),
+        email_backlog=max(_i("EMAIL_BACKLOG", "500"), 1),
         log_level=get("LOG_LEVEL", "INFO").upper(),
         log_max_bytes=_i("LOG_MAX_BYTES", "10485760"),
         log_backup_count=_i("LOG_BACKUP_COUNT", "10"),

@@ -4,6 +4,10 @@ Version number = `VERSION` file. Show it with `run version`; it also appears in 
 `run status`, the Google Sheets Status tab and `logs/health.json`.
 Rule: x.y.z - z = bug fix, y = new feature (data and settings stay compatible), x = needs manual steps.
 
+## 1.15.0 - 2026-10-13
+- New email alerts (SMTP, standard library only). Turn on with `IV4_EMAIL_ENABLED=true` and the `IV4_EMAIL_*` settings in `.env`. The agent checks every 30 s and sends ONE mail for everything new: no files for N minutes, files missing this hour, NG above `IV4_NG_ALERT_PCT`, score drift, backlog, low disk, Google Drive/Sheets errors; plus one mail when the PC came back after a power cut or restart. The same alert repeats at most every `IV4_EMAIL_COOLDOWN_MIN` (kept across restarts in `logs\mail_state.json`). A failed send is retried at the next check. The password is only in `.env` and never logged.
+- New `run mail` (settings and what is missing) and `run mail test` (sends a test mail and explains login/port/firewall failures). `run check` warns when email is off or incomplete. `logs\health.json` has an `email` block.
+
 ## 1.14.0 - 2026-10-13
 - New `run quality`: automatic data-quality check from the hourly tables (hours with far fewer inspections, files the sensor counted but never sent, unreadable results, NG spikes versus this line's normal, tools missing from some pieces, scores outside 0-100, slow processing, sensor clock ahead). Prints and saves `reports\quality-<date>.txt`; exit code 1 when something needs a look, so a scheduled task can run it. Option `--days N`.
 - New `run export-table`: every inspection of a day as one flat file (Parquet, or gzip CSV with `--format csv`) with `tool<N>_status/value` columns and the program version/settings that produced it, default yesterday, saved to `exports\` (or `--out` a shared drive). Re-runs never overwrite unless `--force`. Parquet needs `pyarrow` (`requirements-export.txt`, installed once on first use; falls back to CSV if it cannot).

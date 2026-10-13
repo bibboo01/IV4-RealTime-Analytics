@@ -103,6 +103,7 @@ run production --passive 50000-50100      # ทำจริง (ใส่ช่�
 | `run rollback` | ย้อนกลับเป็นเวอร์ชันก่อน `run update` (ใช้ไฟล์สำรองใน `backups\code-*.zip` ล่าสุด) ไม่แตะ `.env`, `data`, `logs`, `credentials` และสำรองเวอร์ชันปัจจุบันไว้ก่อน สั่งซ้ำ = ยกเลิกการย้อน ตัวเลือก: `--list` `--dry-run` หรือระบุไฟล์ zip (ต้อง `run stop` ก่อน แล้ว `run` ใหม่) |
 | `run report [วันที่]` | สร้างรายงานสรุปรายวันเป็นไฟล์ HTML หน้าเดียว (ยอดตรวจ yield NG% ไฟล์หาย แยกกล้อง แยกชั่วโมง tool ที่ NG มากสุด และข้อควรระวัง) บันทึกที่ `reports\report-วันที่.html` เปิดด้วยเบราว์เซอร์ หรือ Ctrl+P เพื่อบันทึกเป็น PDF ตัวเลือก: `--out ไฟล์.html` |
 | `run report --excel` | สร้างไฟล์ Excel จากข้อมูลจริงใน DB: สรุปละเอียด (ชั่วโมงที่ยอดตก ชั่วโมงที่ NG สูง tool ที่ NG มาก drift ข้อควรตรวจ) + กราฟ + ตารางรายชั่วโมง/วัน/tool/ชั่วโมงของวัน + สาเหตุ NG บันทึกที่ `reports\report-<จาก>_<ถึง>.xlsx` ตัวเลือก: `--days N` (ค่าเริ่มต้น 7) `--from 2026-10-01 --to 2026-10-09` `--all` `--images N` (ฝังรูป NG) `--lang th/en` `--out ไฟล์.xlsx` ครั้งแรกจะติดตั้ง openpyxl เองต้องต่อเน็ต |
+| `run mail [test]` | แจ้งเตือนทางอีเมล: ดูการตั้งค่า (`run mail`) หรือส่งเมลทดสอบ (`run mail test`) ดูหัวข้อ 22.3 |
 | `run quality` | ตรวจคุณภาพข้อมูลอัตโนมัติจากตารางสรุปรายชั่วโมง: ชั่วโมงที่ยอดต่ำผิดปกติ/ไม่มีข้อมูล, ไฟล์ที่ sensor นับแต่ไม่เคยมาถึง (ชั่วโมงที่ยังไม่จบนับเป็น INFO เพราะอาจเป็นไฟล์ค้าง), ผลที่อ่านไม่ได้, NG พุ่งเทียบกับค่าปกติของไลน์, Tool ที่ขาดบางชิ้น, ค่า score นอก 0-100, เวลาประมวลผลช้า, นาฬิกา sensor เร็วกว่า PC พิมพ์ผลและบันทึก `reports\quality-วันที่.txt` ตัวเลือก: `--days N` `--no-save` exit code 1 เมื่อมีสิ่งที่ต้องดู จึงตั้งเป็นงาน Task Scheduler ได้ |
 | `run export-table` | ส่งออกผลตรวจทุกชิ้นของ 1 วันเป็นไฟล์ตารางเดียว (Parquet หรือ `--format csv` แบบ gzip) มีคอลัมน์ `tool<N>_status/value` และเวอร์ชันโปรแกรม/config ที่สร้างผล ค่าเริ่มต้นคือเมื่อวาน บันทึกที่ `exports\inspections_วันที่.parquet` ตัวเลือก: `--day` `--from/--to` `--out <โฟลเดอร์หรือ NAS>` `--force` รันซ้ำไม่ทับไฟล์เดิม ครั้งแรกจะติดตั้ง pyarrow เอง (ถ้าไม่ได้จะใช้ CSV แทน) ตั้งรันทุกคืนได้: `schtasks /create /tn IV4Export /tr "D:\iv4\run.bat export-table" /sc daily /st 02:30` |
 | `run heal` | รีสตาร์ท agent อัตโนมัติเมื่อโปรแกรมยังรันอยู่แต่ค้าง (heartbeat เก่ากว่า `IV4_HEAL_STALE_SEC` ค่าเริ่มต้น 180 วินาที) งาน health-check ทุก 5 นาทีเรียกคำสั่งนี้ให้เอง จึงไม่ต้องติดตั้งใหม่ แค่ `run update` จำกัด 3 ครั้งต่อชั่วโมง ไม่สตาร์ทตัวที่คุณสั่ง `run stop` ไว้ บันทึกที่ `logs\heal.log` ตัวเลือก `--dry-run` |
@@ -319,6 +320,7 @@ iv4-data-agent/
 │   ├── dataset.py           # run export-dataset: คัดรูปเป็นชุดเทรน
 │   ├── report.py            # run report: รายงาน HTML รายวัน (+ ทางเข้า --excel)
 │   ├── report_xlsx.py       # run report --excel: Excel + กราฟ + สรุปละเอียด
+│   ├── mailer.py            # แจ้งเตือนทางอีเมล (SMTP)
 │   ├── quality.py           # run quality: ตรวจคุณภาพข้อมูลอัตโนมัติ
 │   ├── export_table.py      # run export-table: ตารางรายวัน (Parquet/CSV)
 │   ├── clear.py             # run clear: ล้างข้อมูลเริ่มใหม่ (ไม่แตะ .env/credentials)
@@ -1145,6 +1147,24 @@ agent อัปเดต Google Sheet ชื่อ **IV4 Dashboard** (อยู�
 * **ตรวจนโยบายบริษัทก่อน** ว่าอนุญาตให้ส่งยอดผลิตขึ้น Google ได้
 
 ---
+
+## 22.3 แจ้งเตือนทางอีเมล
+
+ใส่ใน `.env` (รหัสผ่านอยู่ที่นี่ที่เดียว ห้ามส่งในแชท):
+
+```
+IV4_EMAIL_ENABLED=true
+IV4_EMAIL_SMTP_HOST=smtp.gmail.com     # หรือ smtp.office365.com / relay ของบริษัท
+IV4_EMAIL_SMTP_PORT=587                # 587 starttls, 465 ssl, 25 none
+IV4_EMAIL_SECURITY=starttls
+IV4_EMAIL_USER=you@gmail.com
+IV4_EMAIL_PASSWORD=app-password        # Gmail/Outlook ต้องใช้ App Password
+IV4_EMAIL_TO=you@gmail.com, boss@company.com
+```
+
+แล้วรัน `run mail test` ถ้าได้เมลแสดงว่าพร้อม จากนั้น `run restart` agent จะส่ง **1 เมลต่อรอบตรวจ** (ทุก 30 วินาที) รวมทุกเรื่องใหม่ ได้แก่ ไม่มีไฟล์เข้ามา N นาที, ไฟล์หายในชั่วโมงนี้, NG เกินเกณฑ์, score drift, ไฟล์ค้างเยอะ, ดิสก์ใกล้เต็ม, อัปโหลด Drive/Sheets ผิดพลาด และเมลเดียวเมื่อเครื่องกลับมาหลังไฟดับ/รีสตาร์ท เรื่องเดิมส่งซ้ำไม่เกินทุก `IV4_EMAIL_COOLDOWN_MIN` (60 นาที) `run mail` ดูสถานะการตั้งค่า
+
+ถ้าเมลไม่ออก: `run mail test` จะบอกสาเหตุ (login ผิด, พอร์ตถูกบล็อก, ต้องใช้ App Password) ถ้าบริษัทบล็อกพอร์ต SMTP ให้ขอ SMTP relay ภายในจาก IT
 
 # 23. Startup และ Recovery
 

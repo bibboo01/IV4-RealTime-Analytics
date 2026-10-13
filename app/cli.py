@@ -27,6 +27,7 @@ IV4 Data Agent - one command for everything.
     run upload              why isn't it uploading to Google Drive? (diagnosis)
     run gdrive-switch       change Google account (forget the old one, sign in again)
     run gdrive-logout       forget the Google account
+    run mail [test]         email alerts: settings, and send a test mail
     run sheets              publish the Google Sheets dashboard once and print its link
     run backup              online database backup
     run test                run the automated tests
@@ -211,6 +212,14 @@ def preflight(s: Settings) -> list[tuple[str, str]]:
     if wants_google and s.gdrive_auth == "oauth":
         if not (s.gdrive_token and s.gdrive_token.exists()):
             add(WARN, "Google Drive/Sheets enabled but not signed in - run: run gdrive-auth")
+
+    if s.email_enabled:
+        from app import mailer
+        miss = mailer.missing_settings(s)
+        if miss:
+            add(WARN, "email alerts are ON but not set up: " + ", ".join(miss) + " - see: run mail")
+    else:
+        add(WARN, "email alerts are OFF (IV4_EMAIL_ENABLED=false) - nobody is told when something goes wrong. See: run mail")
 
     pid = InstanceLock(s.log_dir).running_pid()
     if pid:
@@ -433,6 +442,11 @@ def cmd_quality(args, s: Settings) -> int:
     return quality.run(args, s)
 
 
+def cmd_mail(args, s: Settings) -> int:
+    from app import mailer
+    return mailer.run(args, s)
+
+
 def cmd_report(args, s: Settings) -> int:
     from app import report
     return report.run(args, s)
@@ -551,6 +565,7 @@ COMMANDS = {
     "rollback": cmd_rollback,
     "drift": cmd_drift,
     "quality": cmd_quality,
+    "mail": cmd_mail,
     "export-table": cmd_export_table,
     "report": cmd_report,
     "heal": cmd_heal,
