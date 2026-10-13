@@ -25,7 +25,8 @@ from sqlalchemy import text
 
 from app.config import BASE_DIR
 
-HEADER = ["uid", "timestamp", "sensor", "sensor_result", "score", "failing_tools", "image_file", "truth"]
+HEADER = ["uid", "timestamp", "sensor", "program", "trigger_no", "time_ms", "sensor_result", "score", "failing_tools"]
+TAIL = ["image_file", "folder", "truth"]
 
 
 def _hour(d: datetime) -> str:
@@ -134,7 +135,8 @@ def make_sample(repo, n: int, days: int, now: datetime, seed: int | None = None,
         rows = []
         for i in range(0, len(picked), 500):
             chunk = picked[i:i + 500]
-            q = text("SELECT uid, timestamp, camera_id, analysis_status, score, tools_json, image_file FROM inspection"
+            q = text("SELECT uid, timestamp, camera_id, analysis_status, score, tools_json, image_file, program_no,"
+                     " trigger_no, inspection_time_ms, folder FROM inspection"
                      f" WHERE id IN ({','.join(str(int(x)) for x in chunk)})")
             rows += list(c.execute(q))
     if not rows:
@@ -143,15 +145,26 @@ def make_sample(repo, n: int, days: int, now: datetime, seed: int | None = None,
     out = (base or BASE_DIR) / "reports"
     out.mkdir(exist_ok=True)
     path = out / f"label_sample_{now:%Y-%m-%d_%H%M}.csv"
+    parsed = []
+    tool_cols: dict[int, str] = {}
+    for uid, ts, cam, st, score, tj, img, prog, trig, ms, folder in rows:
+        try:
+            tools = json.loads(tj or "[]")
+        except ValueError:
+            tools = []
+        for x in tools:
+            tool_cols.setdefault(int(x.get("no", 0)), x.get("name") or "")
+        parsed.append((uid, ts, cam, prog, trig, ms, "OK" if st == "PASS" else "NG", score,
+                       ",".join(f"T{x['no']}" for x in tools if str(x.get("status")).upper() == "NG"),
+                       {int(x.get("no", 0)): x for x in tools}, img, folder))
+    nos = sorted(tool_cols)
+    head = HEADER + [c for n in nos for c in (f"tool{n}_status", f"tool{n}_value")] + TAIL
     with open(path, "w", newline="", encoding="utf-8-sig") as fh:
         w = csv.writer(fh)
-        w.writerow(HEADER)
-        for uid, ts, cam, st, score, tj, img in rows:
-            try:
-                bad = ",".join(f"T{t['no']}" for t in json.loads(tj or "[]") if str(t.get("status")).upper() == "NG")
-            except (ValueError, TypeError, KeyError):
-                bad = ""
-            w.writerow([uid, ts, cam, "OK" if st == "PASS" else "NG", score, bad, img, ""])
+        w.writerow(head)
+        for *cols, tools, img, folder in parsed:
+            extra = [v for n in nos for v in ((tools.get(n) or {}).get("status"), (tools.get(n) or {}).get("value"))]
+            w.writerow(cols + extra + [img, folder, ""])
     return path, len(rows)
 
 
