@@ -9,7 +9,7 @@
 The sensor only says OK/NG by its own rule; it cannot say whether that was right. Accuracy therefore needs a person
 to check a sample (--sample) and enter the true answer (--labels). The sample takes equal numbers of sensor-OK and
 sensor-NG pieces so the rare NG side is measured too; the totals are then re-weighted to the real OK/NG counts.
-Saves reports\\sensor-<date>.txt.
+Saves reports\\sensor-<date>.txt and, once pieces are checked, adds a row to reports\\accuracy.csv.
 """
 from __future__ import annotations
 
@@ -323,6 +323,39 @@ def accuracy_section(repo) -> list[str]:
     return out
 
 
+ACC_HEADER = ["run_at", "labelled_from", "labelled_to", "checked", "sensor_ok", "sensor_ng",
+              "TP_sensorNG_truthNG", "FP_sensorNG_truthOK", "FN_sensorOK_truthNG", "TN_sensorOK_truthOK",
+              "accuracy_pct", "precision_pct", "recall_pct", "f1_pct", "false_reject_pct", "missed_defect_pct",
+              "period_total"]
+
+
+def export_accuracy(repo, out_dir: Path, now: datetime) -> Path | None:
+    """Append one row of ready-made numbers to reports\\accuracy.csv (opens in Excel), one row per run."""
+    acc = accuracy(repo)
+    if not acc:
+        return None
+    cm = acc["cm"]
+
+    def pct(v):
+        return "" if v is None else round(100 * v, 2)
+
+    row = [f"{now:%Y-%m-%d %H:%M}", (acc["from"] or "")[:19], (acc["to"] or "")[:19], acc["n"],
+           acc["n_sensor_ok"], acc["n_sensor_ng"], cm[("NG", "NG")], cm[("NG", "OK")], cm[("OK", "NG")],
+           cm[("OK", "OK")], pct(acc["weighted"]), pct(acc.get("precision")), pct(acc.get("recall")),
+           pct(acc.get("f1")),
+           pct(cm[("NG", "OK")] / acc["n_sensor_ng"]) if acc["n_sensor_ng"] else "",
+           pct(cm[("OK", "NG")] / acc["n_sensor_ok"]) if acc["n_sensor_ok"] else "",
+           sum(acc["pop"]) if acc.get("pop") else ""]
+    path = out_dir / "accuracy.csv"
+    new = not path.exists()
+    with path.open("a", newline="", encoding="utf-8-sig" if new else "utf-8") as f:
+        w = csv.writer(f)
+        if new:
+            w.writerow(ACC_HEADER)
+        w.writerow(row)
+    return path
+
+
 # ------------------------------------------------------------------
 
 def run(args: list[str], s, _running_pid=None, now: datetime | None = None, base: Path | None = None) -> int:
@@ -381,6 +414,9 @@ def run(args: list[str], s, _running_pid=None, now: datetime | None = None, base
         out = (base or BASE_DIR) / "reports"
         out.mkdir(exist_ok=True)
         (out / f"sensor-{now:%Y-%m-%d}.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        exported = export_accuracy(repo, out, now)
+        if exported:
+            print(f"\nAccuracy / Precision / Recall / F1 added to {exported} (one row per run, opens in Excel)")
         return 0
     finally:
         repo.dispose()

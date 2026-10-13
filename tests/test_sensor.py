@@ -62,6 +62,12 @@ def test_sample_labels_and_weighted_accuracy(settings, tmp_path):
     assert abs(acc["precision"] - 18 / 20) < 1e-9
     true_ng, missed = p_ng * 18 / 20, p_ok * 1 / 20
     assert abs(acc["recall"] - true_ng / (true_ng + missed)) < 1e-9 and 0 < acc["f1"] < 1
+    out = sensor.export_accuracy(repo, tmp_path, TODAY)
+    sensor.export_accuracy(repo, tmp_path, TODAY)                  # second run appends, header once
+    got = list(csv.DictReader(open(out, encoding="utf-8-sig")))
+    assert len(got) == 2 and got[0]["checked"] == "40" and got[0]["FP_sensorNG_truthOK"] == "2"
+    assert float(got[0]["accuracy_pct"]) == round(100 * acc["weighted"], 2)
+    assert float(got[0]["precision_pct"]) == 90.0 and float(got[0]["false_reject_pct"]) == 10.0
     repo.dispose()
 
 

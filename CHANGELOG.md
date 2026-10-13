@@ -4,6 +4,9 @@ Version number = `VERSION` file. Show it with `run version`; it also appears in 
 `run status`, the Google Sheets Status tab and `logs/health.json`.
 Rule: x.y.z - z = bug fix, y = new feature (data and settings stay compatible), x = needs manual steps.
 
+## 1.17.5 - 2026-10-13
+- `run sensor` now also exports the ready-made numbers to `reports\accuracy.csv` (one row per run: confusion matrix, Accuracy, Precision, Recall, F1, false reject, missed defect), so nothing has to be calculated by hand.
+
 ## 1.17.4 - 2026-10-13
 - `run sensor --sample` also writes an Excel file: an "open" link on every row opens the image, and the `truth` column has an OK/NG drop-down. `run sensor --labels` reads the filled .xlsx directly (CSV still works).
 
