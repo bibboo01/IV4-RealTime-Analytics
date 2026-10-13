@@ -4,7 +4,7 @@ import logging
 import threading
 from datetime import datetime, timedelta, timezone
 
-from app import boot, notify
+from app import boot
 from app.config import load_settings
 from app.database.repository import DatabaseRepository
 
@@ -59,21 +59,6 @@ def test_quick_check_detects_a_damaged_file_and_doctor_command(tmp_path, capsys)
     s.database_path.write_bytes(bytes(data))
     assert boot.quick_check(s.database_path) != "ok"
     assert boot.run([], s) == 1
-
-
-def test_notify_announces_a_power_cut_once(tmp_path):
-    s = load_settings(base_dir=tmp_path, overrides={"IV4_TELEGRAM_ENABLED": "true", "IV4_TELEGRAM_TOKEN": "t",
-                                                    "IV4_TELEGRAM_CHAT_ID": "1"})
-    s.ensure_dirs()
-    sent = []
-    w = notify.NotifyWorker(s, threading.Event(), send=lambda m: (sent.append(m) or (True, "")))
-    now = datetime.now(timezone.utc)
-    rep = boot.assess({"heartbeat_at": (now - timedelta(minutes=45)).isoformat()}, None, now, 3)
-    rep["db_check"] = "ok"
-    (s.log_dir / "last_boot.json").write_text(json.dumps(rep))
-    w.announce_boot()
-    w.announce_boot()
-    assert len(sent) == 1 and "ไฟดับ" in sent[0] and "45" in sent[0] and "ปกติ" in sent[0]
 
 
 def test_large_database_is_not_read_at_startup(tmp_path, monkeypatch):

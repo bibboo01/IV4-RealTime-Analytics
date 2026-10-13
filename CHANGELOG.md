@@ -4,6 +4,9 @@ Version number = `VERSION` file. Show it with `run version`; it also appears in 
 `run status`, the Google Sheets Status tab and `logs/health.json`.
 Rule: x.y.z - z = bug fix, y = new feature (data and settings stay compatible), x = needs manual steps.
 
+## 1.13.0 - 2026-10-13
+- Removed the Telegram integration (`run notify`, shift summaries, Telegram alerts, the power-cut message and the `IV4_TELEGRAM_*`, `IV4_SHIFTS`, `IV4_NOTIFY_*` settings). Alerts are still shown in `run monitor`, `run drift` and `run doctor-boot`. Old `IV4_TELEGRAM_*` lines left in `.env` are ignored and can be deleted. `logs\notify_state.json` is no longer used.
+
 ## 1.12.0 - 2026-10-12
 - New `run report --excel`: an Excel workbook from the live database with a written summary (findings, low-volume hours, high-NG hours, per-tool NG, drift, next checks), native charts, hourly / daily / per-tool / hour-of-day tables, NG reasons and optional sample NG pictures. Options: `--days N`, `--from/--to`, `--all`, `--images N`, `--lang th|en`, `--out`. Needs `openpyxl` (listed in `requirements-report.txt`, installed automatically on first use).
 - Fix: the Telegram "already sent" memory was pruned with the real clock instead of the tick time (only visible when replaying old dates in tests).
