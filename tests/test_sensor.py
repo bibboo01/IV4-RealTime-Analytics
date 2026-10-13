@@ -59,6 +59,9 @@ def test_sample_labels_and_weighted_accuracy(settings, tmp_path):
     want = 1 - (p_ok * 1 / 20 + p_ng * 2 / 20) / (p_ok + p_ng)
     assert abs(acc["weighted"] - want) < 1e-9 and acc["weighted"] > 0.9
     assert acc["fr_tools"]["T1"] == 2
+    assert abs(acc["precision"] - 18 / 20) < 1e-9
+    true_ng, missed = p_ng * 18 / 20, p_ok * 1 / 20
+    assert abs(acc["recall"] - true_ng / (true_ng + missed)) < 1e-9 and 0 < acc["f1"] < 1
     repo.dispose()
 
 

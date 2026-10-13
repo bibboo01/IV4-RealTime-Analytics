@@ -235,6 +235,14 @@ def accuracy(repo) -> dict | None:
             wrong = p_ok * cm[("OK", "NG")] / n_ok + p_ng * cm[("NG", "OK")] / n_ng
             res["weighted"] = 1 - wrong / (p_ok + p_ng)
             res["pop"] = (p_ok, p_ng)
+            # NG = the positive class. Precision: of what it rejected, how much was really NG.
+            # Recall: of all really-NG pieces (estimated for the whole period), how many it caught.
+            true_ng = p_ng * cm[("NG", "NG")] / n_ng
+            missed = p_ok * cm[("OK", "NG")] / n_ok
+            res["precision"] = cm[("NG", "NG")] / n_ng
+            res["recall"] = true_ng / (true_ng + missed) if true_ng + missed else None
+            if res["recall"] is not None and res["precision"] + res["recall"]:
+                res["f1"] = 2 * res["precision"] * res["recall"] / (res["precision"] + res["recall"])
     return res
 
 
@@ -252,6 +260,9 @@ def accuracy_section(repo) -> list[str]:
            f"  Missed defect (sensor OK, truth NG): {_pct(cm[('OK', 'NG')], acc['n_sensor_ok'])}   of the pieces it passed"]
     if acc["weighted"] is not None:
         out.append(f"  Estimated accuracy on all {sum(acc['pop']):,} pieces of that period: {100 * acc['weighted']:.2f}%")
+        if acc.get("recall") is not None:
+            out.append(f"  Precision (NG it rejected that were really NG): {100 * acc['precision']:.1f}%   "
+                       f"Recall (real NG it caught): {100 * acc['recall']:.1f}%   F1: {100 * acc.get('f1', 0):.1f}%")
     if acc["fr_tools"]:
         out.append("  False rejects by failing tool: " + ", ".join(f"{k} x{v}" for k, v in acc["fr_tools"].most_common(5)))
     if acc["n_sensor_ng"] < 30 or acc["n_sensor_ok"] < 30:

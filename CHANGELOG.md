@@ -4,6 +4,9 @@ Version number = `VERSION` file. Show it with `run version`; it also appears in 
 `run status`, the Google Sheets Status tab and `logs/health.json`.
 Rule: x.y.z - z = bug fix, y = new feature (data and settings stay compatible), x = needs manual steps.
 
+## 1.17.3 - 2026-10-13
+- `run sensor` accuracy section adds Precision, Recall and F1 (NG = positive class), with recall estimated for the whole period from the labelled sample.
+
 ## 1.17.2 - 2026-10-13
 - `run metrics --csv` adds per-tool columns for every period: `tool<N>_ng`, `tool<N>_ng_pct`, `tool<N>_avg_value`, `tool<N>_min_value`, `tool<N>_min_ok_value`, so the CSV shows which tool caused the NG of each hour/day.
 
