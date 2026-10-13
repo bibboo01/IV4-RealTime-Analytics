@@ -264,3 +264,19 @@ def test_metrics_cli_all_starts_at_first_recorded_day(settings, repo, monkeypatc
     main()
     out = capsys.readouterr().out
     assert "Period 2026-10-03 .." in out and "2026-10-03" in out_csv.read_text(encoding="utf-8-sig")
+
+
+def test_metrics_csv_has_per_tool_columns(settings, tmp_path, monkeypatch):
+    import csv as _csv
+    import sys
+
+    from scripts import metrics as script
+    from tests.test_report_xlsx import _seed
+    _seed(settings)
+    monkeypatch.setattr(script, "load_settings", lambda: settings)
+    out = tmp_path / "m.csv"
+    monkeypatch.setattr(sys, "argv", ["metrics", "--all", "--by", "day", "--csv", str(out)])
+    script.main()
+    rows = list(_csv.DictReader(open(out, encoding="utf-8-sig")))
+    assert {"tool1_ng", "tool1_ng_pct", "tool2_avg_value", "tool2_min_ok_value"} <= set(rows[0])
+    assert all(r["tool2_ng"] for r in rows) and float(rows[0]["tool2_avg_value"]) > 90

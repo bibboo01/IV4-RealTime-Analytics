@@ -149,6 +149,32 @@ def tool_summary(
     return out
 
 
+def tool_columns(repo, start=None, end=None, by: str = "hour", program_no=None, sensor_id=None,
+                 per_sensor: bool = False) -> tuple[list[str], dict]:
+    """Per-tool numbers for each period, as extra CSV columns: ({(period, sensor): {col: value}}, column names)."""
+    where, params = _filters(start, end, program_no, sensor_id)
+    period = _PERIOD[by]
+    sensor_col = "sensor_id" if per_sensor else "NULL"
+    sql = f"""
+        SELECT {period} AS p, {sensor_col} AS sensor, tool_no, SUM(count), SUM(ng_count), SUM(value_sum),
+               SUM(value_count), MIN(value_min), MIN(ok_value_min)
+        FROM hourly_tool_stats {where} GROUP BY p, sensor, tool_no ORDER BY p, sensor, tool_no
+    """
+    out: dict = {}
+    tools: set[int] = set()
+    with repo.engine.connect() as conn:
+        for p, sensor, no, cnt, ng, vsum, vcnt, vmin, okmin in conn.execute(text(sql), params):
+            tools.add(no)
+            d = out.setdefault((p, sensor), {})
+            d[f"tool{no}_ng"] = ng
+            d[f"tool{no}_ng_pct"] = _pct(ng, cnt)
+            d[f"tool{no}_avg_value"] = round(vsum / vcnt, 2) if vcnt else None
+            d[f"tool{no}_min_value"] = vmin
+            d[f"tool{no}_min_ok_value"] = okmin
+    cols = [f"tool{n}_{k}" for n in sorted(tools) for k in ("ng", "ng_pct", "avg_value", "min_value", "min_ok_value")]
+    return cols, out
+
+
 def _filters(start, end, program_no, sensor_id):
     clauses, params = [], {}
     if start:
