@@ -6,7 +6,7 @@ The agent writes logs/clean_stop.json when it stops normally. At the next start:
   * downtime = now - (clean stop time, or the last heartbeat);
   * files left in processing/ are recovered (done by the agent) and counted;
   * after an unclean stop the database gets a quick integrity check.
-The result is kept in logs/last_boot.json, shown by `run doctor-boot`, and sent to Telegram once (if enabled).
+The result is kept in logs/last_boot.json, shown by `run doctor-boot`.
 """
 from __future__ import annotations
 

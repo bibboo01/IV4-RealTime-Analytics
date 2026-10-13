@@ -12,7 +12,7 @@ import statistics
 import subprocess
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy import text

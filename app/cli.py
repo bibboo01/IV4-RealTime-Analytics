@@ -6,17 +6,18 @@ IV4 Data Agent - one command for everything.
     run clear               delete collected data to start from zero (agent must be stopped; asks first)
     run update <zip>        install a new version from a downloaded ZIP (no git; keeps .env, data, credentials)
     run update <zip> --restart   safe update: stop, update, self-test, start, watch; goes back by itself if it fails
+    run export-table        every inspection of a day as one flat file (Parquet / gzip CSV) for analysis and training
     run export-dataset <folder>   copy NG + OK images into a versioned, labelled training set (labels.csv, dataset.json)
     run doctor-boot         what happened at the last start (power cut? downtime, recovered files) + database check
     run lineage             which program version + settings produced the results (history of changes)
     run heal                restart the agent if it is alive but stuck (the health-check task runs this; --dry-run)
     run report [date]       one-page daily report as HTML (reports\\report-<date>.html), good for managers
     run report --excel      Excel workbook with charts + written summary (--days/--from/--to/--all/--images/--lang)
+    run quality             is the stored data complete and believable? (stops, lost files, NG spikes, bad values; --days N)
     run drift               is any tool's score drifting from its last 7 days? (early warning before NG rises)
     run rollback            go back to the version saved before the last update (--list, --dry-run)
     run restart             stop the agent and start it again (also: run reboot; the PC itself is not restarted)
     run stop                stop the agent (also the Windows task/service, so it does not restart)
-    run notify [test|chatid|now]   Telegram shift notifications: status / send a test / find chat id / preview
     run version             show the program version (see CHANGELOG.md)
     run status              is it running? backlog, errors, today's numbers
     run monitor             live screen: speed, today per sensor, hourly chart, NG (Ctrl+C quits)
@@ -26,6 +27,7 @@ IV4 Data Agent - one command for everything.
     run upload              why isn't it uploading to Google Drive? (diagnosis)
     run gdrive-switch       change Google account (forget the old one, sign in again)
     run gdrive-logout       forget the Google account
+    run mail [test]         email alerts: settings, and send a test mail
     run sheets              publish the Google Sheets dashboard once and print its link
     run backup              online database backup
     run test                run the automated tests
@@ -211,14 +213,13 @@ def preflight(s: Settings) -> list[tuple[str, str]]:
         if not (s.gdrive_token and s.gdrive_token.exists()):
             add(WARN, "Google Drive/Sheets enabled but not signed in - run: run gdrive-auth")
 
-    if s.telegram_enabled:
-        from app.notify import parse_shifts
-        try:
-            parse_shifts(s.shifts)
-        except ConfigError as exc:
-            add(ERR, f"Telegram: {exc}")
-        if not (s.telegram_token and s.telegram_chat_id):
-            add(ERR, "Telegram is ON but IV4_TELEGRAM_TOKEN / IV4_TELEGRAM_CHAT_ID is empty (see: run notify chatid)")
+    if s.email_enabled:
+        from app import mailer
+        miss = mailer.missing_settings(s)
+        if miss:
+            add(WARN, "email alerts are ON but not set up: " + ", ".join(miss) + " - see: run mail")
+    else:
+        add(WARN, "email alerts are OFF (IV4_EMAIL_ENABLED=false) - nobody is told when something goes wrong. See: run mail")
 
     pid = InstanceLock(s.log_dir).running_pid()
     if pid:
@@ -431,6 +432,21 @@ def cmd_drift(args, s: Settings) -> int:
     return drift.run(args, s)
 
 
+def cmd_export_table(args, s: Settings) -> int:
+    from app import export_table
+    return export_table.run(args, s)
+
+
+def cmd_quality(args, s: Settings) -> int:
+    from app import quality
+    return quality.run(args, s)
+
+
+def cmd_mail(args, s: Settings) -> int:
+    from app import mailer
+    return mailer.run(args, s)
+
+
 def cmd_report(args, s: Settings) -> int:
     from app import report
     return report.run(args, s)
@@ -460,11 +476,6 @@ def cmd_version(_args, s: Settings) -> int:
     from app.version import read_version
     print(f"IV4 Data Agent {read_version()}")
     return 0
-
-
-def cmd_notify(args, s: Settings) -> int:
-    from app import notify
-    return notify.run(args, s, InstanceLock(s.log_dir).running_pid)
 
 
 def cmd_upload(args, s: Settings) -> int:
@@ -553,13 +564,15 @@ COMMANDS = {
     "update": cmd_update,
     "rollback": cmd_rollback,
     "drift": cmd_drift,
+    "quality": cmd_quality,
+    "mail": cmd_mail,
+    "export-table": cmd_export_table,
     "report": cmd_report,
     "heal": cmd_heal,
     "lineage": cmd_lineage,
     "export-dataset": cmd_export_dataset,
     "doctor-boot": cmd_doctor_boot,
     "version": cmd_version,
-    "notify": cmd_notify,
     "monitor": _monitor,
     "sheets": cmd_sheets,
     "metrics": lambda a, s: _run_module_main("scripts.metrics", "run metrics", a),

@@ -111,20 +111,26 @@ class Settings:
     sheets_interval: float = 60.0       # seconds between updates (min 15; API limit is ~60 writes/min)
     sheets_title: str = "IV4 Dashboard"
 
-    # Telegram notifications by work shift (app/notify.py)
-    telegram_enabled: bool = False
-    telegram_token: str = ""
-    telegram_chat_id: str = ""
-    shifts: str = "A,08:00,16:00,12:00,13:00;B,16:00,00:00,20:00,21:00;C,00:00,08:00,04:00,05:00"
-    notify_no_data_min: int = 10        # alert when nothing arrived for this many minutes while working
-    notify_backlog: int = 200           # alert when this many files wait in incoming
-    notify_cooldown_min: int = 60       # the same alert is repeated at most this often
+    # Alerts (shown in run monitor)
     ng_alert_pct: float = 15.0          # alert when NG% of the current hour reaches this (0 = off)
     ng_alert_min: int = 200             # ...once the hour has at least this many inspections
     drift_pct: float = 10.0             # alert when a tool's average score moves this % from its 7-day normal (0 = off)
     heal_stale_sec: int = 180           # run heal restarts an agent whose heartbeat is older than this
     drift_min: int = 200                # ...with at least this many recent inspections of that tool
-    notify_missing_min: int = 10        # alert when at least this many files went missing this hour
+
+    # Email alerts (SMTP). The password lives only in .env.
+    email_enabled: bool = False
+    email_host: str = ""
+    email_port: int = 587
+    email_security: str = "starttls"    # starttls (587) | ssl (465) | none (25, internal relay)
+    email_user: str = ""
+    email_password: str = ""
+    email_from: str = ""                # empty = the user name
+    email_to: tuple[str, ...] = ()
+    email_cooldown_min: int = 60        # the same alert is repeated at most this often
+    email_no_data_min: int = 10         # alert when no inspection arrived for this many minutes
+    email_missing_min: int = 20         # alert when this many files went missing in the current hour
+    email_backlog: int = 500            # alert when this many files wait to be processed
 
     # Logging
     log_level: str = "INFO"
@@ -276,19 +282,23 @@ def load_settings(
         sheets_enabled=get("SHEETS_ENABLED", "false").lower() in {"1", "true", "yes"},
         sheets_interval=max(_f("SHEETS_INTERVAL", "60"), 15.0),
         sheets_title=get("SHEETS_TITLE", "IV4 Dashboard"),
-        telegram_enabled=get("TELEGRAM_ENABLED", "false").lower() in {"1", "true", "yes"},
-        telegram_token=get("TELEGRAM_TOKEN", "").strip(),
-        telegram_chat_id=get("TELEGRAM_CHAT_ID", "").strip(),
-        shifts=get("SHIFTS", "A,08:00,16:00,12:00,13:00;B,16:00,00:00,20:00,21:00;C,00:00,08:00,04:00,05:00").strip(),
-        notify_no_data_min=max(_i("NOTIFY_NO_DATA_MIN", "10"), 1),
-        notify_backlog=max(_i("NOTIFY_BACKLOG", "200"), 1),
-        notify_cooldown_min=max(_i("NOTIFY_COOLDOWN_MIN", "60"), 1),
         ng_alert_pct=max(_f("NG_ALERT_PCT", "15"), 0.0),
         ng_alert_min=max(_i("NG_ALERT_MIN", "200"), 1),
         drift_pct=max(_f("DRIFT_PCT", "10"), 0.0),
         drift_min=max(_i("DRIFT_MIN", "200"), 1),
         heal_stale_sec=max(_i("HEAL_STALE_SEC", "180"), 60),
-        notify_missing_min=max(_i("NOTIFY_MISSING_MIN", "10"), 1),
+        email_enabled=get("EMAIL_ENABLED", "false").lower() in {"1", "true", "yes"},
+        email_host=get("EMAIL_SMTP_HOST", "").strip(),
+        email_port=_i("EMAIL_SMTP_PORT", "587"),
+        email_security=get("EMAIL_SECURITY", "starttls").strip().lower(),
+        email_user=get("EMAIL_USER", "").strip(),
+        email_password=get("EMAIL_PASSWORD", ""),
+        email_from=get("EMAIL_FROM", "").strip(),
+        email_to=tuple(a.strip() for a in re.split(r"[;,]", get("EMAIL_TO", "")) if a.strip()),
+        email_cooldown_min=max(_i("EMAIL_COOLDOWN_MIN", "60"), 1),
+        email_no_data_min=max(_i("EMAIL_NO_DATA_MIN", "10"), 1),
+        email_missing_min=max(_i("EMAIL_MISSING_MIN", "20"), 1),
+        email_backlog=max(_i("EMAIL_BACKLOG", "500"), 1),
         log_level=get("LOG_LEVEL", "INFO").upper(),
         log_max_bytes=_i("LOG_MAX_BYTES", "10485760"),
         log_backup_count=_i("LOG_BACKUP_COUNT", "10"),

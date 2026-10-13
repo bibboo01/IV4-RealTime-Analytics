@@ -30,10 +30,10 @@ def make(tmp_path, n_ng=3, n_ok=10):
 
 
 def test_lineage_snapshot_has_no_secrets_or_paths_and_is_stamped(tmp_path):
-    s = load_settings(base_dir=tmp_path, overrides={"IV4_TELEGRAM_TOKEN": "SECRET123", "IV4_TELEGRAM_CHAT_ID": "999"})
+    s = load_settings(base_dir=tmp_path, overrides={"IV4_GDRIVE_TOKEN": "SECRET123"})
     snap = lineage.snapshot(s)
-    assert "SECRET123" not in json.dumps(snap) and "999" not in json.dumps(snap)
-    assert "telegram_token" not in snap and "database_path" not in snap and "ng_alert_pct" in snap
+    assert "SECRET123" not in json.dumps(snap) and not any(lineage.SECRET.search(k) for k in snap)
+    assert "gdrive_token" not in snap and "database_path" not in snap and "ng_alert_pct" in snap
     assert lineage.config_hash(snap) == lineage.config_hash(dict(snap))
     s2 = load_settings(base_dir=tmp_path, overrides={"IV4_NG_ALERT_PCT": "30"})
     assert lineage.config_hash(lineage.snapshot(s2)) != lineage.config_hash(snap)

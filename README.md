@@ -2,7 +2,7 @@
 
 ระบบสำหรับรับข้อมูล Inspection จาก **KEYENCE IV4 G500CA** แบบอัตโนมัติ โดยรับไฟล์จาก Sensor ได้แก่ Image (`JPG/JPEG`) และข้อมูลผลการตรวจสอบ (`TXT`) จากนั้นทำการจับคู่ข้อมูล, Parse ข้อมูล, วิเคราะห์ผล และบันทึกลงฐานข้อมูล
 
-> **Current Status:** Core Realtime Pipeline พร้อม Production (hardened, 219 automated tests บน Windows/Linux) เวอร์ชัน 1.12.0 — รองรับ sensor หลายตัว, Live monitor ใน terminal, Google Drive + Google Sheets Dashboard, รายงาน HTML/Excel, อัปเดตแบบปลอดภัย + rollback, self-heal, ตรวจ DB หลังไฟดับ, แจ้งเตือน NG/drift/ไฟล์ค้าง, ติดตั้งและรันด้วยคำสั่งเดียว (`run`, `run production`) ประวัติการเปลี่ยนแปลงดู `CHANGELOG.md`  
+> **Current Status:** Core Realtime Pipeline พร้อม Production (hardened, automated tests บน Windows/Linux + lint + release อัตโนมัติ) เวอร์ชัน 1.14.0 — รองรับ sensor หลายตัว, Live monitor ใน terminal, Google Drive + Google Sheets Dashboard, รายงาน HTML/Excel, ตรวจคุณภาพข้อมูล (`run quality`), ส่งออกตารางรายวัน, อัปเดตแบบปลอดภัย + rollback, self-heal, ตรวจ DB หลังไฟดับ, แจ้งเตือน NG/drift/ไฟล์ค้าง, ติดตั้งและรันด้วยคำสั่งเดียว (`run`, `run production`) ประวัติการเปลี่ยนแปลงดู `CHANGELOG.md`  
 > **เริ่มใช้งาน:** ดูหัวข้อ **ติดตั้งและรัน** ด้านล่าง  
 > **Google Drive / Sheets:** พร้อมใช้งาน (ปิดไว้เป็นค่าเริ่มต้น — ตั้ง `IV4_UPLOAD_ENABLED=true` / `IV4_SHEETS_ENABLED=true` ใน `.env` หลังเชื่อมบัญชี)
 
@@ -46,7 +46,7 @@ run
 | `IV4_TIME_OFFSET_HOURS` | ชดเชยเวลา sensor ที่ตั้งผิดและแก้ที่ sensor ไม่ได้ เช่น sensor เร็วกว่าจริง 2 ชม. ใส่ `-2` (มีผลกับไฟล์ใหม่เท่านั้น ข้อมูลเก่าไม่เปลี่ยน; ถ้าแก้นาฬิกาที่ sensor ได้ ให้แก้ที่ sensor แทน) |
 | `IV4_RETENTION_OK_DAYS` / `IV4_RETENTION_NG_DAYS` | จำนวนวันที่เก็บรูป (0 = ไม่ลบเอง ระบบลบรูป OK เก่าสุดเองเมื่อดิสก์เหลือต่ำกว่า `IV4_MIN_FREE_GB`) ถ้าเปิด upload ไว้ ระบบจะรอให้โฟลเดอร์นั้นอัปโหลดเสร็จก่อนค่อยลบ (รอสูงสุดอีก 14 วัน) เช่น `OK=2`, `NG=30` |
 | `IV4_RESIZE_OK` / `IV4_RESIZE_QUALITY` | ย่อรูป OK (PASS) ตอนเก็บเข้า archive ให้พอดีกรอบที่กำหนด เช่น `640x480` ประหยัดดิสก์ ~3-4 เท่า รูป NG/UNKNOWN เก็บต้นฉบับ ระบบตรวจว่าไฟล์ใหม่เปิดได้ก่อนแทนที่ ถ้าผิดพลาดจะเก็บต้นฉบับไว้ ปิดเป็นค่าเริ่มต้น (ไม่ช่วยลดภาระ FTP จากเซ็นเซอร์ ต้องตั้งที่ตัว IV4) |
-| `IV4_NG_ALERT_PCT` / `IV4_NG_ALERT_MIN` | เตือนเมื่อ NG ชั่วโมงนี้ ≥ PCT % (ค่าเริ่มต้น 15) และตรวจแล้วอย่างน้อย MIN ชิ้น (ค่าเริ่มต้น 200) แสดงใน `run monitor` และส่ง Telegram ตั้ง PCT=0 เพื่อปิด |
+| `IV4_NG_ALERT_PCT` / `IV4_NG_ALERT_MIN` | เตือนเมื่อ NG ชั่วโมงนี้ ≥ PCT % (ค่าเริ่มต้น 15) และตรวจแล้วอย่างน้อย MIN ชิ้น (ค่าเริ่มต้น 200) แสดงใน `run monitor` ตั้ง PCT=0 เพื่อปิด |
 | `IV4_DRIFT_PCT` / `IV4_DRIFT_MIN` | เตือนเมื่อค่า score เฉลี่ยของ tool ใน 2 ชม.ล่าสุดเบี่ยงจากค่าปกติ 7 วันก่อนหน้า ≥ PCT % (ค่าเริ่มต้น 10) หรือ NG ของ tool นั้นพุ่งเกิน 2 เท่า ต้องมีข้อมูลล่าสุดอย่างน้อย MIN ชิ้น (ค่าเริ่มต้น 200) และข้อมูลย้อนหลังอย่างน้อย 2,000 ชิ้น ตั้ง PCT=0 เพื่อปิด ดูผลทันทีด้วย `run drift` |
 | `IV4_USE_POLLING` | `true` ถ้า `incoming` เป็น network share |
 | `IV4_UPLOAD_ENABLED` | `true` เมื่อต้องการอัปโหลดขึ้น Google Drive (ค่าเริ่มต้นปิด) |
@@ -97,17 +97,19 @@ run production --passive 50000-50100      # ทำจริง (ใส่ช่�
 | ดูสถานะสดใน terminal | `run monitor` |
 | สรุปสั้น ๆ (ทำงานอยู่ไหม, ยอดวันนี้) | `run status` |
 | หยุดรัน | `run clear` | **ล้างข้อมูลเริ่มใหม่** ลบฐานข้อมูล + รูปที่เก็บไว้ (ต้อง `run stop` ก่อน และต้องพิมพ์ `CLEAR` ยืนยัน) ไม่แตะ `.env`, การล็อกอิน Google, backup และไฟล์ที่อยู่บน Drive แล้ว ตัวเลือก: `--dry-run` (ดูก่อนไม่ลบ) `--db-only` `--images-only` `--incoming` `--logs` `--yes` |
-| `run notify` | แจ้งเตือน Telegram ตามกะ: `run notify` ดูสถานะ, `test` ส่งทดสอบ, `chatid` หา chat id, `now` ดูสรุปกะปัจจุบัน (หัวข้อ 22.3) |
 | `run version` | แสดงเลขเวอร์ชันของโปรแกรม (เช่น 1.0.0) เลขเดียวกันนี้ขึ้นที่หัว `run monitor`, บรรทัด Version ใน `run status`, แท็บ Status ใน Google Sheets และ `logs\health.json` รายการสิ่งที่เปลี่ยนในแต่ละเวอร์ชันอยู่ในไฟล์ `CHANGELOG.md` เลขเวอร์ชัน `x.y.z`: z เพิ่ม = แก้บั๊ก, y เพิ่ม = ฟีเจอร์ใหม่ (ข้อมูลและ `.env` เดิมใช้ต่อได้), x เพิ่ม = ต้องทำขั้นตอนเพิ่มด้วยมือ (จะบอกใน CHANGELOG) |
 | `run update <zip>` | **อัปเดตโปรแกรมโดยไม่ต้องใช้ git** ดาวน์โหลด ZIP จาก GitHub (Code > Download ZIP) แล้วสั่ง `run update C:\path\file.zip` จะแทนที่เฉพาะไฟล์โปรแกรม ไม่แตะ `.env`, `data`, `logs`, `credentials`, `backups` และสำรองโปรแกรมเก่าไว้ที่ `backups\code-วันที่.zip` (ต้อง `run stop` ก่อน; `--dry-run` ดูก่อนไม่เปลี่ยน) |
 | `run update <zip> --restart` | **อัปเดตแบบปลอดภัย** หยุด agent → สำรองของเก่า → อัปเดต → ติดตั้ง requirements ถ้ามีเปลี่ยน → ทดสอบโค้ดใหม่ (import ทุกโมดูล โหลดค่าตั้ง) → สตาร์ท → เฝ้าดู heartbeat สูงสุด 2 นาที ถ้าขั้นไหนพัง จะย้อนกลับเวอร์ชันเดิมและสตาร์ทให้เอง ไม่ต้อง `run stop` ก่อน ไม่แตะ `.env` ข้อมูล และ credentials |
 | `run rollback` | ย้อนกลับเป็นเวอร์ชันก่อน `run update` (ใช้ไฟล์สำรองใน `backups\code-*.zip` ล่าสุด) ไม่แตะ `.env`, `data`, `logs`, `credentials` และสำรองเวอร์ชันปัจจุบันไว้ก่อน สั่งซ้ำ = ยกเลิกการย้อน ตัวเลือก: `--list` `--dry-run` หรือระบุไฟล์ zip (ต้อง `run stop` ก่อน แล้ว `run` ใหม่) |
 | `run report [วันที่]` | สร้างรายงานสรุปรายวันเป็นไฟล์ HTML หน้าเดียว (ยอดตรวจ yield NG% ไฟล์หาย แยกกล้อง แยกชั่วโมง tool ที่ NG มากสุด และข้อควรระวัง) บันทึกที่ `reports\report-วันที่.html` เปิดด้วยเบราว์เซอร์ หรือ Ctrl+P เพื่อบันทึกเป็น PDF ตัวเลือก: `--out ไฟล์.html` |
 | `run report --excel` | สร้างไฟล์ Excel จากข้อมูลจริงใน DB: สรุปละเอียด (ชั่วโมงที่ยอดตก ชั่วโมงที่ NG สูง tool ที่ NG มาก drift ข้อควรตรวจ) + กราฟ + ตารางรายชั่วโมง/วัน/tool/ชั่วโมงของวัน + สาเหตุ NG บันทึกที่ `reports\report-<จาก>_<ถึง>.xlsx` ตัวเลือก: `--days N` (ค่าเริ่มต้น 7) `--from 2026-10-01 --to 2026-10-09` `--all` `--images N` (ฝังรูป NG) `--lang th/en` `--out ไฟล์.xlsx` ครั้งแรกจะติดตั้ง openpyxl เองต้องต่อเน็ต |
+| `run mail [test]` | แจ้งเตือนทางอีเมล: ดูการตั้งค่า (`run mail`) หรือส่งเมลทดสอบ (`run mail test`) ดูหัวข้อ 22.3 |
+| `run quality` | ตรวจคุณภาพข้อมูลอัตโนมัติจากตารางสรุปรายชั่วโมง: ชั่วโมงที่ยอดต่ำผิดปกติ/ไม่มีข้อมูล, ไฟล์ที่ sensor นับแต่ไม่เคยมาถึง (ชั่วโมงที่ยังไม่จบนับเป็น INFO เพราะอาจเป็นไฟล์ค้าง), ผลที่อ่านไม่ได้, NG พุ่งเทียบกับค่าปกติของไลน์, Tool ที่ขาดบางชิ้น, ค่า score นอก 0-100, เวลาประมวลผลช้า, นาฬิกา sensor เร็วกว่า PC พิมพ์ผลและบันทึก `reports\quality-วันที่.txt` ตัวเลือก: `--days N` `--no-save` exit code 1 เมื่อมีสิ่งที่ต้องดู จึงตั้งเป็นงาน Task Scheduler ได้ |
+| `run export-table` | ส่งออกผลตรวจทุกชิ้นของ 1 วันเป็นไฟล์ตารางเดียว (Parquet หรือ `--format csv` แบบ gzip) มีคอลัมน์ `tool<N>_status/value` และเวอร์ชันโปรแกรม/config ที่สร้างผล ค่าเริ่มต้นคือเมื่อวาน บันทึกที่ `exports\inspections_วันที่.parquet` ตัวเลือก: `--day` `--from/--to` `--out <โฟลเดอร์หรือ NAS>` `--force` รันซ้ำไม่ทับไฟล์เดิม ครั้งแรกจะติดตั้ง pyarrow เอง (ถ้าไม่ได้จะใช้ CSV แทน) ตั้งรันทุกคืนได้: `schtasks /create /tn IV4Export /tr "D:\iv4\run.bat export-table" /sc daily /st 02:30` |
 | `run heal` | รีสตาร์ท agent อัตโนมัติเมื่อโปรแกรมยังรันอยู่แต่ค้าง (heartbeat เก่ากว่า `IV4_HEAL_STALE_SEC` ค่าเริ่มต้น 180 วินาที) งาน health-check ทุก 5 นาทีเรียกคำสั่งนี้ให้เอง จึงไม่ต้องติดตั้งใหม่ แค่ `run update` จำกัด 3 ครั้งต่อชั่วโมง ไม่สตาร์ทตัวที่คุณสั่ง `run stop` ไว้ บันทึกที่ `logs\heal.log` ตัวเลือก `--dry-run` |
 | `run export-dataset <โฟลเดอร์>` | คัดรูปจาก archive ออกเป็นชุดข้อมูลเทรนที่มีเลขเวอร์ชัน: `images\NG`, `images\OK`, `labels.csv`, `dataset.json` (เลขเวอร์ชัน `ds-วันที่-hash`, จำนวน, และ lineage) ค่าเริ่มต้น = NG ทั้งหมด + OK สุ่มจำนวนเท่ากัน ตัวเลือก `--from` `--to` `--sensor` `--ok-per-ng` `--limit` `--dry-run` คัดลอกเท่านั้น ไม่ย้ายหรือลบต้นฉบับ ไม่เขียนทับโฟลเดอร์เดิม |
 | `run lineage` | ดูประวัติว่าผลตรวจแต่ละช่วงมาจากโปรแกรมเวอร์ชันและค่าตั้งอะไร (ทุกผลตรวจเก็บ `app_version` + `config_hash` ตั้งแต่ 1.9.0) และค่าตั้งใดเปลี่ยนระหว่างช่วง |
-| `run doctor-boot` | ดูว่าตอนเริ่มโปรแกรมครั้งล่าสุดเกิดอะไรขึ้น (ไฟดับ/ค้าง หรือรีสตาร์ทปกติ, หยุดไปกี่นาที, กู้ไฟล์ค้างกี่ชุด) และตรวจฐานข้อมูลตอนนี้ (`--full` ตรวจละเอียดแต่ช้ากว่า) agent ทำเองทุกครั้งที่เริ่ม และส่ง Telegram แจ้งเมื่อเริ่มหลังหยุดผิดปกติ |
+| `run doctor-boot` | ดูว่าตอนเริ่มโปรแกรมครั้งล่าสุดเกิดอะไรขึ้น (ไฟดับ/ค้าง หรือรีสตาร์ทปกติ, หยุดไปกี่นาที, กู้ไฟล์ค้างกี่ชุด) และตรวจฐานข้อมูลตอนนี้ (`--full` ตรวจละเอียดแต่ช้ากว่า) agent ทำเองทุกครั้งที่เริ่ม |
 | `run stop` |
 | รายงาน/ส่งออก Excel | `run metrics --by day --per-sensor --csv report.csv` |
 | Dashboard บน Google Sheets | `run sheets` (หรือเปิดลิงก์ที่ได้) |
@@ -122,6 +124,10 @@ run production --passive 50000-50100      # ทำจริง (ใส่ช่�
 1. `run backup` (สำรองก่อน)
 2. ดึงโค้ดใหม่ (`git pull` หรือก๊อปทับ) **โดยไม่ลบ** `.env`, `credentials\`, `data\`, `logs\`, `backups\`
 3. restart agent (หรือรัน `run` ใหม่) — library ถูกติดตั้งใหม่เฉพาะเมื่อ `requirements.txt` เปลี่ยน และ database อัปเกรดโครงสร้างให้เองโดยข้อมูลเดิมอยู่ครบ
+
+**ตรวจ zip ก่อนติดตั้ง:** ถ้ามีไฟล์ `.sha256` ของ release ให้ใช้ `run update <zip> --restart --sha256=<ค่า hash>` ระบบจะไม่ติดตั้งถ้า zip เสียหรือไม่ตรง
+
+**Release อัตโนมัติ (สำหรับผู้พัฒนา):** ติด tag `vX.Y.Z` (ต้องตรงกับไฟล์ `VERSION`) แล้ว push GitHub Actions จะรัน lint + เทสต์ สร้าง zip + SHA-256 และเผยแพร่เป็น release (`.github/workflows/release.yml`)
 
 **Excel report ครั้งแรก:** `run report --excel` จะติดตั้ง `openpyxl` ให้เอง (ต้องต่อเน็ตครั้งเดียว) ตามรายการใน `requirements-report.txt`
 
@@ -306,7 +312,6 @@ iv4-data-agent/
 │   ├── diagnose.py          # run upload: ตรวจว่าทำไมไม่อัปโหลด
 │   ├── production.py        # run production: ตั้งเครื่อง Windows ให้พร้อมใช้งานจริง
 │   ├── maintenance.py       # retention + disk guard
-│   ├── notify.py            # แจ้งเตือน Telegram (สรุปกะ, NG, drift, ไฟดับ)
 │   ├── update.py            # run update / rollback (สำรอง, smoke test, ย้อนอัตโนมัติ)
 │   ├── heal.py              # run heal: รีสตาร์ท agent ที่ค้าง
 │   ├── boot.py              # ตรวจการหยุดผิดปกติ/ไฟดับตอนเริ่ม + run doctor-boot
@@ -315,6 +320,9 @@ iv4-data-agent/
 │   ├── dataset.py           # run export-dataset: คัดรูปเป็นชุดเทรน
 │   ├── report.py            # run report: รายงาน HTML รายวัน (+ ทางเข้า --excel)
 │   ├── report_xlsx.py       # run report --excel: Excel + กราฟ + สรุปละเอียด
+│   ├── mailer.py            # แจ้งเตือนทางอีเมล (SMTP)
+│   ├── quality.py           # run quality: ตรวจคุณภาพข้อมูลอัตโนมัติ
+│   ├── export_table.py      # run export-table: ตารางรายวัน (Parquet/CSV)
 │   ├── clear.py             # run clear: ล้างข้อมูลเริ่มใหม่ (ไม่แตะ .env/credentials)
 │   ├── version.py           # อ่านเลขเวอร์ชันจากไฟล์ VERSION
 │   │
@@ -381,8 +389,8 @@ iv4-data-agent/
 │   ├── test_sheets.py
 │   ├── test_production.py
 │   ├── test_diagnose.py
-│   ├── test_notify.py / test_update.py / test_heal.py / test_boot.py
-│   ├── test_dataset.py / test_report_xlsx.py / test_clear.py
+│   ├── test_update.py / test_heal.py / test_boot.py
+│   ├── test_dataset.py / test_report_xlsx.py / test_clear.py / test_quality.py / test_export_table.py
 │   └── test_cli.py          # + test_metrics / test_multi_sensor / test_database
 │
 ├── run.bat                  # คำสั่งเดียว (Windows)
@@ -393,6 +401,8 @@ iv4-data-agent/
 ├── CHANGELOG.md             # ประวัติการเปลี่ยนแปลง
 ├── requirements.txt
 ├── requirements-report.txt  # openpyxl (ติดตั้งเองเมื่อใช้ run report --excel)
+├── requirements-export.txt  # pyarrow (ติดตั้งเองเมื่อใช้ run export-table แบบ Parquet)
+├── ruff.toml                # กฎ lint (เฉพาะบั๊ก)
 ├── requirements-dev.txt
 └── README.md
 ```
@@ -1138,36 +1148,23 @@ agent อัปเดต Google Sheet ชื่อ **IV4 Dashboard** (อยู�
 
 ---
 
-## 22.3 แจ้งเตือน Telegram ตามกะทำงาน
+## 22.3 แจ้งเตือนทางอีเมล
 
-ส่งข้อความเข้า Telegram ตามช่วงกะ (ค่าเริ่มต้น 3 กะ กะละ 8 ชม. เริ่ม 08:00 (08:00-16:00, 16:00-24:00, 00:00-08:00)) ทำงานในตัว agent เดียวกัน ไม่ต้องติดตั้งเพิ่ม
+ใส่ใน `.env` (รหัสผ่านอยู่ที่นี่ที่เดียว ห้ามส่งในแชท):
 
-**ข้อความที่ได้ (ภาษาไทย)**
-- ต้นกะ: บอกว่าเริ่มกะอะไร และ agent ทำงานอยู่
-- เริ่มพัก: ยอดสะสมของกะถึงตอนนี้
-- สิ้นกะ: สรุปกะ แยกตาม sensor: ตรวจกี่ชุด, NG กี่ชุด (กี่ %), อัตราผ่าน, ไฟล์หาย และ Tool ที่ NG มากสุด 3 อันดับ
-- เตือนระหว่างทำงาน **(ไม่เตือนตอนพัก และไม่ถี่)**: ไม่มีไฟล์เข้ามาเกิน 10 นาที, ไฟล์หายตั้งแต่ 10 ชุดขึ้นไปในชั่วโมงนั้น, ไฟล์ค้างเกิน 200, ดิสก์ต่ำ, อัปโหลด Drive/Sheets ผิดพลาด ถ้าเจอหลายเรื่องพร้อมกันจะรวมเป็น **ข้อความเดียว** และเรื่องเดิมจะเตือนซ้ำไม่ถี่กว่า 60 นาที (ปรับด้วย `IV4_NOTIFY_COOLDOWN_MIN`, `IV4_NOTIFY_MISSING_MIN`)
-- ส่งแต่ละข้อความครั้งเดียว รีสตาร์ทแล้วไม่ส่งซ้ำ ถ้าส่งไม่ผ่าน (ไม่มีเน็ต) จะลองใหม่ภายใน 15 นาที
-
-**ตั้งค่า**
-1. ใน Telegram คุยกับ `@BotFather` พิมพ์ `/newbot` ตั้งชื่อ ได้ **token** (ห้ามแชร์ token)
-2. เปิดบอทของคุณแล้วกด Start (ถ้าจะให้เข้ากลุ่ม ให้เพิ่มบอทเข้ากลุ่มแล้วพิมพ์ข้อความ 1 ข้อความ)
-3. ใส่ token ใน `.env` แล้วรัน `run notify chatid` จะแสดง `IV4_TELEGRAM_CHAT_ID=...` ให้ก๊อปใส่ `.env`
-4. ตั้งเวลากะใน `.env` (เวลาของเครื่อง 24 ชม., กะข้ามเที่ยงคืนได้, ส่วนพักไม่ใส่ก็ได้):
 ```
-IV4_TELEGRAM_ENABLED=true
-IV4_TELEGRAM_TOKEN=123456:ABC...
-IV4_TELEGRAM_CHAT_ID=-1001234567890
-IV4_SHIFTS=A,08:00,16:00,12:00,13:00;B,16:00,00:00,20:00,21:00;C,00:00,08:00,04:00,05:00
+IV4_EMAIL_ENABLED=true
+IV4_EMAIL_SMTP_HOST=smtp.gmail.com     # หรือ smtp.office365.com / relay ของบริษัท
+IV4_EMAIL_SMTP_PORT=587                # 587 starttls, 465 ssl, 25 none
+IV4_EMAIL_SECURITY=starttls
+IV4_EMAIL_USER=you@gmail.com
+IV4_EMAIL_PASSWORD=app-password        # Gmail/Outlook ต้องใช้ App Password
+IV4_EMAIL_TO=you@gmail.com, boss@company.com
 ```
-รูปแบบกะ: `ชื่อ,เริ่ม,จบ[,พักเริ่ม,พักจบ]` คั่นแต่ละกะด้วย `;`
-5. `run notify test` ส่งข้อความทดสอบ, `run notify` ดูกะและเหตุการณ์ถัดไป, `run notify now` ดูสรุปกะปัจจุบัน (ใส่ `--send` เพื่อส่งเข้า Telegram), แล้ว `run stop` และ `run` ใหม่
 
-**ข้อจำกัด**
-- สรุปกะนับตามชั่วโมงเต็มที่คาบเกี่ยว (ถ้ากะเริ่ม/จบกลางชั่วโมง จะมีข้อความบอก)
-- ตัวส่งอยู่ใน agent ถ้า agent หยุดทำงาน จะไม่มีข้อความเตือนว่าหยุด (ใช้ `run production` ให้เปิดกลับเองเมื่อล้ม และดู `run monitor`)
-- ต้องมีอินเทอร์เน็ตเข้า `api.telegram.org` ได้จากเครื่อง Mini PC
+แล้วรัน `run mail test` ถ้าได้เมลแสดงว่าพร้อม จากนั้น `run restart` agent จะส่ง **1 เมลต่อรอบตรวจ** (ทุก 30 วินาที) รวมทุกเรื่องใหม่ ได้แก่ ไม่มีไฟล์เข้ามา N นาที, ไฟล์หายในชั่วโมงนี้, NG เกินเกณฑ์, score drift, ไฟล์ค้างเยอะ, ดิสก์ใกล้เต็ม, อัปโหลด Drive/Sheets ผิดพลาด และเมลเดียวเมื่อเครื่องกลับมาหลังไฟดับ/รีสตาร์ท เรื่องเดิมส่งซ้ำไม่เกินทุก `IV4_EMAIL_COOLDOWN_MIN` (60 นาที) `run mail` ดูสถานะการตั้งค่า
 
+ถ้าเมลไม่ออก: `run mail test` จะบอกสาเหตุ (login ผิด, พอร์ตถูกบล็อก, ต้องใช้ App Password) ถ้าบริษัทบล็อกพอร์ต SMTP ให้ขอ SMTP relay ภายในจาก IT
 
 # 23. Startup และ Recovery
 

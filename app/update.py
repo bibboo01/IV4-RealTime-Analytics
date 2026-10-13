@@ -7,6 +7,7 @@ Download the new version as a ZIP (GitHub: Code > Download ZIP), then:
     run update <zip> --dry-run      show what would change, change nothing
     run update <zip> --restart      safe update: stop, update, self-test, start, watch it for 2 minutes and
                                     GO BACK to the old version by itself if anything fails
+    run update <zip> --sha256=<hex> refuse the zip unless its SHA-256 matches (the .sha256 file next to a release zip)
 
 Only program files are replaced (app/, scripts/, deploy/, tests/, run.bat, run.sh, README.md,
 requirements*.txt, .env.example). NEVER touched: .env, data/, logs/, credentials/, backups/, .venv/.
@@ -14,6 +15,7 @@ The old program files are saved to backups/code-<date>.zip first. The agent must
 """
 from __future__ import annotations
 
+import hashlib
 import shutil
 import subprocess
 import sys
@@ -25,7 +27,7 @@ from pathlib import Path
 from app.config import BASE_DIR, Settings
 
 CODE_DIRS = ("app", "scripts", "deploy", "tests")
-CODE_FILES = ("VERSION", "CHANGELOG.md", "run.bat", "run.sh", "README.md", "requirements.txt", "requirements-dev.txt", "requirements-report.txt",
+CODE_FILES = ("VERSION", "CHANGELOG.md", "run.bat", "run.sh", "README.md", "requirements.txt", "requirements-dev.txt", "requirements-report.txt", "requirements-export.txt",
               ".env.example", ".gitignore", ".gitattributes")
 SKIP_DIR_NAMES = {"__pycache__", ".pytest_cache"}
 
@@ -201,6 +203,7 @@ def run(args: list[str], s: Settings, running_pid, base: Path | None = None, hoo
     safe = "--restart" in args
     dry = "--dry-run" in args
     rest = [a for a in args if not a.startswith("--")]
+    expect = next((a.split("=", 1)[1].strip().lower() for a in args if a.startswith("--sha256=")), None)
     if "-h" in args or "--help" in args or len(rest) != 1:
         print(__doc__)
         return 0 if ("-h" in args or "--help" in args) else 2
@@ -216,6 +219,19 @@ def run(args: list[str], s: Settings, running_pid, base: Path | None = None, hoo
 
     tmp = None
     try:
+        if expect is not None:
+            if not source.is_file():
+                print("--sha256 only works with a zip file.")
+                return 2
+            h = hashlib.sha256()
+            with open(source, "rb") as f:
+                for chunk in iter(lambda: f.read(1 << 20), b""):
+                    h.update(chunk)
+            if h.hexdigest() != expect:
+                print(f"Checksum does not match - the download is damaged or not the release you expected.\n"
+                      f"  expected {expect}\n  actual   {h.hexdigest()}")
+                return 2
+            print("Checksum OK.")
         if source.is_file():
             if not zipfile.is_zipfile(source):
                 print(f"Not a zip file: {source}")

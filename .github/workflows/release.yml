@@ -1,0 +1,40 @@
+name: release
+
+# Push a tag like v1.13.0 (must equal the VERSION file): tests run, then a release zip + SHA-256 are attached
+# to a GitHub release. On the Mini PC:  run update <zip> --restart --sha256=<hex from the .sha256 file>
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: tag must match VERSION
+        run: |
+          v="$(tr -d '[:space:]' < VERSION)"
+          if [ "v$v" != "${GITHUB_REF_NAME}" ]; then echo "tag ${GITHUB_REF_NAME} != VERSION v$v"; exit 1; fi
+      - run: python -m pip install -r requirements-dev.txt ruff
+      - run: ruff check .
+      - run: python -m pytest -q
+      - name: build zip + checksum
+        run: |
+          name="iv4-data-agent-${GITHUB_REF_NAME}"
+          mkdir dist
+          git archive --format=zip --prefix="${name}/" -o "dist/${name}.zip" HEAD
+          (cd dist && sha256sum "${name}.zip" | tee "${name}.zip.sha256")
+      - name: publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/* --title "IV4 Data Agent ${GITHUB_REF_NAME}" \
+            --notes "Install: run update <zip> --restart --sha256=<hash in the .sha256 file>. See CHANGELOG.md."

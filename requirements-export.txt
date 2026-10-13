@@ -1,0 +1,2 @@
+# Only for `run export-table --format parquet` (installed automatically on first use; CSV needs nothing extra)
+pyarrow>=15
