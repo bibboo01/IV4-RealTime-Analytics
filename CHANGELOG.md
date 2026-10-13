@@ -4,6 +4,10 @@ Version number = `VERSION` file. Show it with `run version`; it also appears in 
 `run status`, the Google Sheets Status tab and `logs/health.json`.
 Rule: x.y.z - z = bug fix, y = new feature (data and settings stay compatible), x = needs manual steps.
 
+## 1.18.0 - 2026-10-13
+- `run sensor --day 2026-10-13`: metrics, the new check and `--sample` cover only that day; the report is saved as `reports\sensor-<that day>.txt`.
+- `run sensor` adds a "Check without labels" section (no person needed): NG in normal hours, NG that came in runs of 20+ in a row (line stop / empty frames), which tool rejects, and how many scores sit near the pass line.
+
 ## 1.17.5 - 2026-10-13
 - `run sensor` now also exports the ready-made numbers to `reports\accuracy.csv` (one row per run: confusion matrix, Accuracy, Precision, Recall, F1, false reject, missed defect), so nothing has to be calculated by hand.
 

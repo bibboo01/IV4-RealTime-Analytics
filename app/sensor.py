@@ -2,6 +2,7 @@
 
     run sensor                          report: sensor changes, per-tool metrics, accuracy (if labelled)
     run sensor --days N                 metrics window (default 7)
+    run sensor --day 2026-10-13         only that day (metrics, check without labels, --sample)
     run sensor --set "Tool1 threshold 70->65"   write down a change made on the sensor (shown with NG% before/after)
     run sensor --sample N               write reports\\label_sample_<date>.csv: N inspections to check by eye
     run sensor --labels file.csv        import the checked answers (columns uid,truth with OK/NG), then report
@@ -90,22 +91,29 @@ def notes_section(repo, now: datetime, limit: int = 8) -> list[str]:
 # metrics
 # ------------------------------------------------------------------
 
-def tool_metrics(repo, now: datetime, days: int) -> list[dict]:
-    a = _hour(now - timedelta(days=days))
+def _window(now: datetime, days: int, day: datetime | None) -> tuple[datetime, datetime]:
+    if day:
+        start = day.replace(hour=0, minute=0, second=0, microsecond=0)
+        return start, start + timedelta(days=1)
+    return now - timedelta(days=days), now + timedelta(seconds=1)
+
+
+def tool_metrics(repo, now: datetime, days: int, day: datetime | None = None) -> list[dict]:
+    a, b = _window(now, days, day)
     sql = """SELECT sensor_id, program_no, tool_no, MAX(tool_name), SUM(count), SUM(ng_count), SUM(value_sum),
                     SUM(value_count), MIN(value_min), MIN(ok_value_min)
-             FROM hourly_tool_stats WHERE hour >= :a GROUP BY sensor_id, program_no, tool_no
+             FROM hourly_tool_stats WHERE hour >= :a AND hour < :b GROUP BY sensor_id, program_no, tool_no
              ORDER BY sensor_id, program_no, tool_no"""
     with repo.engine.connect() as c:
-        rows = c.execute(text(sql), {"a": a}).all()
+        rows = c.execute(text(sql), {"a": _hour(a), "b": _hour(b) if day else "9999"}).all()
     return [{"sensor": r[0], "program": r[1], "tool": r[2], "name": r[3], "n": r[4] or 0, "ng": r[5] or 0,
              "avg": r[6] / r[7] if r[7] else None, "min": r[8], "ok_min": r[9]} for r in rows]
 
 
-def metrics_section(repo, now: datetime, days: int) -> list[str]:
-    rows = tool_metrics(repo, now, days)
+def metrics_section(repo, now: datetime, days: int, day: datetime | None = None) -> list[str]:
+    rows = tool_metrics(repo, now, days, day)
     if not rows:
-        return [f"  no inspections in the last {days} days"]
+        return [f"  no inspections on {day:%Y-%m-%d}" if day else f"  no inspections in the last {days} days"]
     out = [f"  {'Sensor/Tool':32}{'Inspections':>12}{'NG %':>8}{'Avg value':>11}{'Lowest':>9}{'Lowest OK':>11}"]
     f = lambda v: "-" if v is None else f"{v:.1f}"   # noqa: E731
     for r in rows:
@@ -116,21 +124,100 @@ def metrics_section(repo, now: datetime, days: int) -> list[str]:
     return out
 
 
+RUN_MIN = 20          # this many NG in a row = the line stopped / empty frames, not real defects
+NEAR = (70, 80)       # scores this close to the pass line are the sensor's unsure calls
+
+
+def check_without_labels(repo, now: datetime, day: datetime | None) -> dict | None:
+    """What can be judged without a person: normal-hour NG, NG in long runs, unsure scores, which tool rejects."""
+    a, b = _window(now, 1, day)
+    sql = text("SELECT timestamp, analysis_status, tools_json FROM inspection WHERE timestamp >= :a AND timestamp < :b"
+               " AND analysis_status IN ('PASS', 'FAIL') ORDER BY timestamp, trigger_no, id")
+    with repo.engine.connect() as c:
+        rows = c.execute(sql, {"a": a.strftime("%Y-%m-%d %H:%M:%S"), "b": b.strftime("%Y-%m-%d %H:%M:%S")}).all()
+    if not rows:
+        return None
+    hours: dict = {}
+    res = {"n": len(rows), "ng": 0, "run_ng": 0, "runs": 0, "near": 0, "only": Counter(), "multi": 0,
+           "from": a, "to": b}
+    streak = 0
+
+    def close(k):
+        if k >= RUN_MIN:
+            res["run_ng"] += k
+            res["runs"] += 1
+
+    for t, st, tj in rows:
+        ng = st == "FAIL"
+        h = hours.setdefault((t or "")[:13], [0, 0])
+        h[0] += 1
+        h[1] += ng
+        res["ng"] += ng
+        if ng:
+            streak += 1
+        else:
+            close(streak)
+            streak = 0
+        try:
+            tools = json.loads(tj or "[]")
+        except ValueError:
+            tools = []
+        bad = []
+        for x in tools:
+            v = _num(str(x.get("value", "")))
+            if isinstance(v, (int, float)) and NEAR[0] <= v < NEAR[1]:
+                res["near"] += 1
+                break
+        for x in tools:
+            if str(x.get("status")).upper() == "NG":
+                bad.append(f"T{x.get('no')}")
+        if len(bad) == 1:
+            res["only"][bad[0]] += 1
+        elif len(bad) > 1:
+            res["multi"] += 1
+    close(streak)
+    normal = [v for v in hours.values() if v[0] and v[1] / v[0] <= 0.05]
+    res["hours"], res["normal_hours"] = len(hours), len(normal)
+    res["normal_n"], res["normal_ng"] = sum(v[0] for v in normal), sum(v[1] for v in normal)
+    return res
+
+
+def check_section(repo, now: datetime, day: datetime | None) -> list[str]:
+    r = check_without_labels(repo, now, day)
+    if not r:
+        return ["  no inspections in that period"]
+    out = [f"  {r['n']:,} pieces, NG {100 * r['ng'] / r['n']:.2f}%"]
+    if r["normal_n"]:
+        out.append(f"  Normal hours (NG <= 5%): {r['normal_hours']} of {r['hours']}, NG {100 * r['normal_ng'] / r['normal_n']:.2f}%"
+                   f"  -> the sensor passes at least {100 - 100 * r['normal_ng'] / r['normal_n']:.1f}% correctly there")
+    if r["ng"]:
+        out.append(f"  NG in runs of {RUN_MIN}+ in a row: {r['run_ng']:,} ({100 * r['run_ng'] / r['ng']:.1f}% of NG, "
+                   f"{r['runs']} runs) - likely line stop / empty frames, check those images")
+        only = ", ".join(f"only {k} x{v:,}" for k, v in sorted(r["only"].items()))
+        out.append(f"  Which tool rejects: {only}{', ' if only else ''}several tools x{r['multi']:,}")
+    out.append(f"  Unsure calls (a score {NEAR[0]}-{NEAR[1] - 1}, near the pass line): {r['near']:,} "
+               f"({100 * r['near'] / r['n']:.2f}%)")
+    out.append("  (no person needed for this part; missed defects can only be measured with --sample/--labels)")
+    return out
+
+
 # ------------------------------------------------------------------
 # labels and accuracy
 # ------------------------------------------------------------------
 
-def make_sample(repo, n: int, days: int, now: datetime, seed: int | None = None, base: Path | None = None) -> tuple[Path | None, int]:
+def make_sample(repo, n: int, days: int, now: datetime, seed: int | None = None, base: Path | None = None,
+                day: datetime | None = None) -> tuple[Path | None, int]:
     """Half sensor-OK, half sensor-NG, random, not yet labelled. Returns (file, rows)."""
-    a = (now - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    wa, wb = _window(now, days, day)
+    a, b = wa.strftime("%Y-%m-%d %H:%M:%S"), wb.strftime("%Y-%m-%d %H:%M:%S")
     rng = random.Random(seed)
     picked: list = []
     with repo.engine.connect() as c:
         for status in ("PASS", "FAIL"):
             ids = [r[0] for r in c.execute(text(
                 "SELECT i.id FROM inspection i LEFT JOIN sensor_label l ON l.uid = i.uid"
-                " WHERE i.analysis_status = :s AND i.timestamp >= :a AND l.uid IS NULL AND i.image_file IS NOT NULL"),
-                {"s": status, "a": a})]
+                " WHERE i.analysis_status = :s AND i.timestamp >= :a AND i.timestamp < :b AND l.uid IS NULL"
+                " AND i.image_file IS NOT NULL"), {"s": status, "a": a, "b": b})]
             picked += rng.sample(ids, min(len(ids), n // 2 + (n % 2 if status == "PASS" else 0)))
         rows = []
         for i in range(0, len(picked), 500):
@@ -361,12 +448,14 @@ def export_accuracy(repo, out_dir: Path, now: datetime) -> Path | None:
 def run(args: list[str], s, _running_pid=None, now: datetime | None = None, base: Path | None = None) -> int:
     from app.database.repository import DatabaseRepository
 
-    opt: dict = {"days": 7, "set": None, "sample": None, "labels": None}
+    opt: dict = {"days": 7, "day": None, "set": None, "sample": None, "labels": None}
     it = iter(args)
     try:
         for a in it:
             if a == "--days":
                 opt["days"] = max(int(next(it)), 1)
+            elif a == "--day":
+                opt["day"] = datetime.strptime(next(it), "%Y-%m-%d")
             elif a == "--set":
                 opt["set"] = next(it).strip()
             elif a == "--sample":
@@ -377,7 +466,7 @@ def run(args: list[str], s, _running_pid=None, now: datetime | None = None, base
                 print(f"Unknown option {a}. See: run help")
                 return 2
     except (StopIteration, ValueError):
-        print("Bad option value. Examples: run sensor --days 7 | --sample 200 | --labels file.csv | --set \"text\"")
+        print("Bad option value. Examples: run sensor --days 7 | --day 2026-10-13 | --sample 200 | --labels file.csv | --set \"text\"")
         return 2
 
     now = now or datetime.now()
@@ -387,7 +476,7 @@ def run(args: list[str], s, _running_pid=None, now: datetime | None = None, base
             add_note(repo, opt["set"], now)
             print(f"Written down: {now:%Y-%m-%d %H:%M}  {opt['set']}")
         if opt["sample"]:
-            path, n = make_sample(repo, opt["sample"], max(opt["days"], 1), now, base=base)
+            path, n = make_sample(repo, opt["sample"], max(opt["days"], 1), now, base=base, day=opt["day"])
             if not path:
                 print("No inspections with images to sample in that period (try --days 30).")
                 return 1
@@ -406,14 +495,18 @@ def run(args: list[str], s, _running_pid=None, now: datetime | None = None, base
                 print("  ! " + p)
             if problems and not saved:
                 return 2
-        lines = [f"Sensor report {now:%Y-%m-%d %H:%M}", "",
+        day = opt["day"]
+        span = f"on {day:%Y-%m-%d}" if day else f"last {opt['days']} days"
+        lines = [f"Sensor report {now:%Y-%m-%d %H:%M}" + (f"  (day {day:%Y-%m-%d})" if day else ""), "",
                  "1. Changes written down on the sensor (parameters)"] + notes_section(repo, now) + [
-                 "", f"2. Metrics per tool, last {opt['days']} days"] + metrics_section(repo, now, opt["days"]) + [
-                 "", "3. Accuracy (against pieces checked by a person)"] + accuracy_section(repo)
+                 "", f"2. Metrics per tool, {span}"] + metrics_section(repo, now, opt["days"], day) + [
+                 "", f"3. Check without labels, {'on ' + format(day, '%Y-%m-%d') if day else 'last 24 hours'}"]
+        lines += check_section(repo, now, day) + [
+                 "", "4. Accuracy (against pieces checked by a person, all labels)"] + accuracy_section(repo)
         print("\n".join(lines))
         out = (base or BASE_DIR) / "reports"
         out.mkdir(exist_ok=True)
-        (out / f"sensor-{now:%Y-%m-%d}.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        (out / f"sensor-{(day or now):%Y-%m-%d}.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
         exported = export_accuracy(repo, out, now)
         if exported:
             print(f"\nAccuracy / Precision / Recall / F1 added to {exported} (one row per run, opens in Excel)")
