@@ -38,7 +38,7 @@ def test_sample_labels_and_weighted_accuracy(settings, tmp_path):
     path, n = sensor.make_sample(repo, 40, 7, TODAY, seed=1, base=tmp_path)
     assert n == 40
     rows = list(csv.DictReader(open(path, encoding="utf-8-sig")))
-    assert sum(r["sensor_result"] == "NG" for r in rows) == 20 and all(r["truth"] == r["sensor_result"] and r["filled_by"].startswith("auto") for r in rows)
+    assert sum(r["sensor_result"] == "NG" for r in rows) == 20 and all(r["truth"] == "" and r["system_truth"] == r["sensor_result"] for r in rows)
     # a person checks: 2 of the 20 sensor-NG were really OK; 1 of the 20 sensor-OK was really NG
     fr = miss = 0
     for r in rows:
@@ -163,10 +163,22 @@ def test_labels_xlsx_without_openpyxl_gives_hint(settings, tmp_path, monkeypatch
     assert "Save it as CSV" in capsys.readouterr().out
 
 
-def test_prefill_only_when_tools_agree():
+def test_system_truth_only_when_tools_agree():
     ok, ng = {"status": "OK"}, {"status": "NG"}
-    assert sensor.prefill("OK", {1: ok, 2: ok}) == ("auto: tools agree", "OK")
-    assert sensor.prefill("NG", {1: ng, 2: ng}) == ("auto: tools agree", "NG")
-    assert sensor.prefill("NG", {1: ng, 2: ok}) == ("REVIEW", "")
-    assert sensor.prefill("NG", {1: ok, 2: ok}) == ("REVIEW", "")      # tools fine but sensor said NG: look at it
-    assert sensor.prefill("OK", {}) == ("REVIEW", "")
+    assert sensor.system_truth("OK", {1: ok, 2: ok}) == "OK"
+    assert sensor.system_truth("NG", {1: ng, 2: ng}) == "NG"
+    assert sensor.system_truth("NG", {1: ng, 2: ok}) == ""
+    assert sensor.system_truth("NG", {1: ok, 2: ok}) == ""      # tools fine but sensor said NG: look at it
+    assert sensor.system_truth("OK", {}) == ""
+
+
+def test_only_person_truth_counts(settings, tmp_path):
+    _seed(settings)
+    _pieces(settings, 2, 2)
+    f = tmp_path / "l.csv"
+    f.write_text("uid,system_truth,truth\np0,OK,OK\np1,OK,\np2,NG,OK\np3,,NG\n", encoding="utf-8")
+    repo = DatabaseRepository(settings.database_path)
+    stats: dict = {}
+    saved, blank, problems = sensor.import_labels(repo, f, TODAY, stats)
+    repo.dispose()
+    assert (saved, blank, problems) == (3, 1, []) and stats == {"vs_system": 1}

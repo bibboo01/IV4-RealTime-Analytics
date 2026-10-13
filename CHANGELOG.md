@@ -4,6 +4,9 @@ Version number = `VERSION` file. Show it with `run version`; it also appears in 
 `run status`, the Google Sheets Status tab and `logs/health.json`.
 Rule: x.y.z - z = bug fix, y = new feature (data and settings stay compatible), x = needs manual steps.
 
+## 1.18.3 - 2026-10-13
+- `run sensor --sample`: the system's answer now goes in its own column `system_truth` (blank where the tools disagree) and `truth` is left empty for the person. Only `truth` is used for Accuracy/Precision/Recall, so the result is no longer the sensor checking itself. `--labels` also says on how many rows the person answered differently from `system_truth`.
+
 ## 1.18.2 - 2026-10-13
 - `run sensor --sample`: `truth` is pre-filled when every tool agrees with the sensor; rows where they differ stay blank with `filled_by` = REVIEW (the Excel file has a filter on the header). Pre-filled rows are the sensor's own answer, so spot-check some of them too.
 
