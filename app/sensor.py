@@ -27,7 +27,7 @@ from sqlalchemy import text
 from app.config import BASE_DIR
 
 HEADER = ["uid", "timestamp", "sensor", "program", "trigger_no", "time_ms", "sensor_result", "score", "failing_tools"]
-TAIL = ["image_file", "folder", "filled_by", "truth"]
+TAIL = ["image_file", "folder", "system_truth", "truth"]
 
 
 def _hour(d: datetime) -> str:
@@ -205,13 +205,13 @@ def check_section(repo, now: datetime, day: datetime | None) -> list[str]:
 # labels and accuracy
 # ------------------------------------------------------------------
 
-def prefill(sensor_result: str, tools: dict) -> tuple[str, str]:
-    """(filled_by, truth): when every tool agrees with each other and with the sensor, pre-fill that answer so a
-    person only has to look at the rest. It is still the sensor's own answer - spot-check some of these too."""
+def system_truth(sensor_result: str, tools: dict) -> str:
+    """The system's suggestion: the sensor's answer when every tool agrees with it, else blank (= look closely).
+    It goes in its own column; only the person's 'truth' column is used for accuracy."""
     st = {str(x.get("status")).upper() for x in tools.values()}
     if len(st) == 1 and st.pop() == sensor_result:
-        return "auto: tools agree", sensor_result
-    return "REVIEW", ""
+        return sensor_result
+    return ""
 
 
 def make_sample(repo, n: int, days: int, now: datetime, seed: int | None = None, base: Path | None = None,
@@ -260,7 +260,7 @@ def make_sample(repo, n: int, days: int, now: datetime, seed: int | None = None,
         w.writerow(head)
         for *cols, tools, img, folder in parsed:
             extra = [v for n in nos for v in ((tools.get(n) or {}).get("status"), (tools.get(n) or {}).get("value"))]
-            w.writerow(cols + extra + [img, folder, *prefill(cols[6], tools)])
+            w.writerow(cols + extra + [img, folder, system_truth(cols[6], tools), ""])
     return path, len(rows)
 
 
@@ -319,8 +319,9 @@ def _read_rows(path: Path) -> list[dict]:
         return list(csv.DictReader(fh))
 
 
-def import_labels(repo, path: Path, now: datetime) -> tuple[int, int, list[str]]:
-    """(saved, skipped_blank, problems). truth must be OK or NG; unknown uids are reported."""
+def import_labels(repo, path: Path, now: datetime, stats: dict | None = None) -> tuple[int, int, list[str]]:
+    """(saved, skipped_blank, problems). truth must be OK or NG; unknown uids are reported. Only the person's
+    'truth' column counts; 'system_truth' is just compared (stats['vs_system'] = rows where they differ)."""
     saved = blank = 0
     problems: list[str] = []
     rows = _read_rows(path)
@@ -344,6 +345,9 @@ def import_labels(repo, path: Path, now: datetime) -> tuple[int, int, list[str]]
                            " ON CONFLICT(uid) DO UPDATE SET truth = excluded.truth, labeled_at = excluded.labeled_at"),
                       {"u": uid, "t": truth, "n": now})
             saved += 1
+            sys_t = (r.get("system_truth") or "").strip().upper()
+            if stats is not None and sys_t and sys_t != truth:
+                stats["vs_system"] = stats.get("vs_system", 0) + 1
     return saved, blank, problems
 
 
@@ -493,8 +497,9 @@ def run(args: list[str], s, _running_pid=None, now: datetime | None = None, base
             from app.report_xlsx import ensure_openpyxl
             book = write_label_workbook(path, str(s.archive_dir)) if ensure_openpyxl() is None else None
             target = book or path
-            print(f"Wrote {n} pieces to {target}\n'truth' is pre-filled where all tools agree; filter "
-                  f"'filled_by' = REVIEW, click 'open' to see each image and pick OK or NG (blank = skip), save, then: run sensor --labels \"{target}\"")
+            print(f"Wrote {n} pieces to {target}\n'system_truth' = the system's answer (blank where the tools disagree). "
+                  f"Look at each image ('open') and put your own OK or NG in 'truth' - only 'truth' is used for "
+                  f"accuracy (blank = skip). Save, then: run sensor --labels \"{target}\"")
             return 0
         if opt["labels"]:
             if not opt["labels"].exists():
@@ -507,8 +512,11 @@ def run(args: list[str], s, _running_pid=None, now: datetime | None = None, base
                     print(f"Cannot read .xlsx ({err}). Save it as CSV in Excel (File > Save As > CSV UTF-8) and use "
                           "that file, or run: .venv\\Scripts\\python -m pip install openpyxl")
                     return 2
-            saved, blank, problems = import_labels(repo, opt["labels"], now)
-            print(f"Imported {saved} answers ({blank} blank skipped).")
+            stats: dict = {}
+            saved, blank, problems = import_labels(repo, opt["labels"], now, stats)
+            print(f"Imported {saved} answers from the 'truth' column ({blank} blank skipped).")
+            if stats.get("vs_system"):
+                print(f"  you answered differently from 'system_truth' on {stats['vs_system']} rows")
             for p in problems[:10]:
                 print("  ! " + p)
             if problems and not saved:
