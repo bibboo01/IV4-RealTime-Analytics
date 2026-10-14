@@ -182,3 +182,18 @@ def test_only_person_truth_counts(settings, tmp_path):
     saved, blank, problems = sensor.import_labels(repo, f, TODAY, stats)
     repo.dispose()
     assert (saved, blank, problems) == (3, 1, []) and stats == {"vs_system": 1}
+
+
+def test_clear_labels(settings, tmp_path):
+    _seed(settings)
+    _pieces(settings, 2, 2)
+    f = tmp_path / "l.csv"
+    f.write_text("uid,truth\np0,OK\np2,NG\n", encoding="utf-8")
+    assert sensor.run(["--labels", str(f)], settings, base=tmp_path, now=TODAY) == 0
+    repo = DatabaseRepository(settings.database_path)
+    assert sensor.accuracy(repo)["n"] == 2
+    repo.dispose()
+    assert sensor.run(["--clear-labels"], settings, base=tmp_path, now=TODAY) == 0
+    repo = DatabaseRepository(settings.database_path)
+    assert sensor.accuracy(repo) is None
+    repo.dispose()
