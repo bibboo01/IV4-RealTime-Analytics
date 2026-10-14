@@ -6,6 +6,7 @@
     run sensor --set "Tool1 threshold 70->65"   write down a change made on the sensor (shown with NG% before/after)
     run sensor --sample N               write reports\\label_sample_<date>.csv: N inspections to check by eye
     run sensor --labels file.csv        import the checked answers (columns uid,truth with OK/NG), then report
+    run sensor --clear-labels           forget all imported answers (e.g. old pre-filled ones), then --labels again
 
 The sensor only says OK/NG by its own rule; it cannot say whether that was right. Accuracy therefore needs a person
 to check a sample (--sample) and enter the true answer (--labels). The sample takes equal numbers of sensor-OK and
@@ -462,7 +463,7 @@ def export_accuracy(repo, out_dir: Path, now: datetime) -> Path | None:
 def run(args: list[str], s, _running_pid=None, now: datetime | None = None, base: Path | None = None) -> int:
     from app.database.repository import DatabaseRepository
 
-    opt: dict = {"days": 7, "day": None, "set": None, "sample": None, "labels": None}
+    opt: dict = {"days": 7, "day": None, "set": None, "sample": None, "labels": None, "clear": False}
     it = iter(args)
     try:
         for a in it:
@@ -474,6 +475,8 @@ def run(args: list[str], s, _running_pid=None, now: datetime | None = None, base
                 opt["set"] = next(it).strip()
             elif a == "--sample":
                 opt["sample"] = max(int(next(it)), 2)
+            elif a == "--clear-labels":
+                opt["clear"] = True
             elif a == "--labels":
                 opt["labels"] = Path(next(it))
             else:
@@ -486,6 +489,10 @@ def run(args: list[str], s, _running_pid=None, now: datetime | None = None, base
     now = now or datetime.now()
     repo = DatabaseRepository(s.database_path)
     try:
+        if opt["clear"]:
+            with repo.engine.begin() as c:
+                n = c.execute(text("DELETE FROM sensor_label")).rowcount
+            print(f"Forgot {n} imported answers. Import the files you trust again with --labels.")
         if opt["set"]:
             add_note(repo, opt["set"], now)
             print(f"Written down: {now:%Y-%m-%d %H:%M}  {opt['set']}")
