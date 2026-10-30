@@ -5,6 +5,9 @@
     run sensor --day 2026-10-13         only that day (metrics, check without labels, --sample)
     run sensor --set "Tool1 threshold 70->65"   write down a change made on the sensor (shown with NG% before/after)
     run sensor --sample N               write reports\\label_sample_<date>.csv: N inspections to check by eye
+    run sensor --sample N --from 2026-10-08 --to 2026-10-14      only pieces from that period (dates included)
+    run sensor --sample N --from "2026-10-08 14:00" --to "2026-10-08 15:00"   date + time
+    run sensor --sample N --time 14:00-15:00                     only that time of day, every day (22:00-06:00 crosses midnight)
     run sensor --labels file.csv        import the checked answers (columns uid,truth with OK/NG), then report
     run sensor --clear-labels           forget all imported answers (e.g. old pre-filled ones), then --labels again
 
@@ -215,11 +218,39 @@ def system_truth(sensor_result: str, tools: dict) -> str:
     return ""
 
 
+def parse_when(v: str, end: bool = False) -> datetime:
+    """'2026-10-08' or '2026-10-08 14:00'. A bare date as an end means the end of that day."""
+    v = v.strip().replace("T", " ")
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+        try:
+            return datetime.strptime(v, fmt)
+        except ValueError:
+            pass
+    d = datetime.strptime(v, "%Y-%m-%d")
+    return d + timedelta(days=1) if end else d
+
+
+def parse_hours(v: str) -> tuple[str, str]:
+    """'14:00-15:00' -> ('14:00', '15:00'); the start is included, the end is not."""
+    a, b = (x.strip() for x in v.split("-", 1))
+    return tuple(datetime.strptime(x, "%H:%M").strftime("%H:%M") for x in (a, b))  # type: ignore[return-value]
+
+
 def make_sample(repo, n: int, days: int, now: datetime, seed: int | None = None, base: Path | None = None,
-                day: datetime | None = None) -> tuple[Path | None, int]:
-    """Half sensor-OK, half sensor-NG, random, not yet labelled. Returns (file, rows)."""
+                day: datetime | None = None, start: datetime | None = None, end: datetime | None = None,
+                hours: tuple[str, str] | None = None) -> tuple[Path | None, int]:
+    """Half sensor-OK, half sensor-NG, random, not yet labelled. Returns (file, rows).
+    start/end narrow the period; hours keeps only that time of day (wraps past midnight when start > end)."""
     wa, wb = _window(now, days, day)
+    if start or end:
+        wa, wb = start or wa, end or wb
     a, b = wa.strftime("%Y-%m-%d %H:%M:%S"), wb.strftime("%Y-%m-%d %H:%M:%S")
+    where, params = "", {"a": a, "b": b}
+    if hours:
+        params["h1"], params["h2"] = hours
+        tod = "substr(i.timestamp, 12, 5)"
+        where = (f" AND {tod} >= :h1 AND {tod} < :h2" if hours[0] < hours[1]
+                 else f" AND ({tod} >= :h1 OR {tod} < :h2)")
     rng = random.Random(seed)
     picked: list = []
     with repo.engine.connect() as c:
@@ -227,7 +258,7 @@ def make_sample(repo, n: int, days: int, now: datetime, seed: int | None = None,
             ids = [r[0] for r in c.execute(text(
                 "SELECT i.id FROM inspection i LEFT JOIN sensor_label l ON l.uid = i.uid"
                 " WHERE i.analysis_status = :s AND i.timestamp >= :a AND i.timestamp < :b AND l.uid IS NULL"
-                " AND i.image_file IS NOT NULL"), {"s": status, "a": a, "b": b})]
+                " AND i.image_file IS NOT NULL" + where), {"s": status, **params})]
             picked += rng.sample(ids, min(len(ids), n // 2 + (n % 2 if status == "PASS" else 0)))
         rows = []
         for i in range(0, len(picked), 500):
@@ -463,7 +494,8 @@ def export_accuracy(repo, out_dir: Path, now: datetime) -> Path | None:
 def run(args: list[str], s, _running_pid=None, now: datetime | None = None, base: Path | None = None) -> int:
     from app.database.repository import DatabaseRepository
 
-    opt: dict = {"days": 7, "day": None, "set": None, "sample": None, "labels": None, "clear": False}
+    opt: dict = {"days": 7, "day": None, "set": None, "sample": None, "labels": None, "clear": False,
+                 "from": None, "to": None, "time": None}
     it = iter(args)
     try:
         for a in it:
@@ -471,6 +503,12 @@ def run(args: list[str], s, _running_pid=None, now: datetime | None = None, base
                 opt["days"] = max(int(next(it)), 1)
             elif a == "--day":
                 opt["day"] = datetime.strptime(next(it), "%Y-%m-%d")
+            elif a == "--from":
+                opt["from"] = parse_when(next(it))
+            elif a == "--to":
+                opt["to"] = parse_when(next(it), end=True)
+            elif a == "--time":
+                opt["time"] = parse_hours(next(it))
             elif a == "--set":
                 opt["set"] = next(it).strip()
             elif a == "--sample":
@@ -483,7 +521,8 @@ def run(args: list[str], s, _running_pid=None, now: datetime | None = None, base
                 print(f"Unknown option {a}. See: run help")
                 return 2
     except (StopIteration, ValueError):
-        print("Bad option value. Examples: run sensor --days 7 | --day 2026-10-13 | --sample 200 | --labels file.csv | --set \"text\"")
+        print("Bad option value. Examples: run sensor --days 7 | --day 2026-10-13 | --sample 200 | --labels file.csv | --set \"text\""
+              "\n  --from 2026-10-08 | --from \"2026-10-08 14:00\" | --to 2026-10-14 | --time 14:00-15:00")
         return 2
 
     now = now or datetime.now()
@@ -497,9 +536,13 @@ def run(args: list[str], s, _running_pid=None, now: datetime | None = None, base
             add_note(repo, opt["set"], now)
             print(f"Written down: {now:%Y-%m-%d %H:%M}  {opt['set']}")
         if opt["sample"]:
-            path, n = make_sample(repo, opt["sample"], max(opt["days"], 1), now, base=base, day=opt["day"])
+            if opt["from"] and opt["to"] and opt["from"] >= opt["to"]:
+                print("--from must be before --to.")
+                return 2
+            path, n = make_sample(repo, opt["sample"], max(opt["days"], 1), now, base=base, day=opt["day"],
+                                  start=opt["from"], end=opt["to"], hours=opt["time"])
             if not path:
-                print("No inspections with images to sample in that period (try --days 30).")
+                print("No inspections with images to sample in that period (try --days 30, or a wider --from/--to/--time).")
                 return 1
             from app.report_xlsx import ensure_openpyxl
             book = write_label_workbook(path, str(s.archive_dir)) if ensure_openpyxl() is None else None
