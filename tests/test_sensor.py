@@ -197,3 +197,48 @@ def test_clear_labels(settings, tmp_path):
     repo = DatabaseRepository(settings.database_path)
     assert sensor.accuracy(repo) is None
     repo.dispose()
+
+
+def _at(settings, items):
+    repo = DatabaseRepository(settings.database_path)
+    with repo.engine.begin() as c:
+        for i, (ts, ng) in enumerate(items):
+            c.execute(text(
+                "INSERT INTO inspection (uid, inspection_id, timestamp, camera_id, analysis_status, score, tools_json,"
+                " image_file, created_at, updated_at) VALUES (:u, :i, :t, 'IV4-01', :s, 90, '[]', :img, :c, :c)"),
+                {"u": f"t{i}", "i": f"{i:05d}", "t": ts, "s": "FAIL" if ng else "PASS", "img": f"t{i}.jpg",
+                 "c": datetime.utcnow()})
+    return repo
+
+
+def _uids(path):
+    return {r["uid"] for r in csv.DictReader(open(path, encoding="utf-8-sig"))}
+
+
+def test_sample_from_to_and_time_of_day(settings, tmp_path):
+    _seed(settings)
+    now = datetime(2026, 10, 20, 12, 0)
+    items = [("2026-10-08 14:30:00", False), ("2026-10-08 14:40:00", True), ("2026-10-08 09:00:00", False),
+             ("2026-10-09 14:10:00", True), ("2026-10-09 23:30:00", False), ("2026-10-10 02:00:00", True),
+             ("2026-10-15 14:20:00", False)]
+    repo = _at(settings, items)
+    kw = dict(seed=1, base=tmp_path)
+    p, n = sensor.make_sample(repo, 20, 30, now, start=sensor.parse_when("2026-10-08"),
+                              end=sensor.parse_when("2026-10-09", end=True), **kw)
+    assert _uids(p) == {"t0", "t1", "t2", "t3", "t4"}                        # both whole days, nothing after
+    p, n = sensor.make_sample(repo, 20, 30, now, start=sensor.parse_when("2026-10-08 14:00"),
+                              end=sensor.parse_when("2026-10-08 15:00", end=True), **kw)
+    assert _uids(p) == {"t0", "t1"}
+    p, n = sensor.make_sample(repo, 20, 30, now, hours=sensor.parse_hours("14:00-15:00"), **kw)
+    assert _uids(p) == {"t0", "t1", "t3", "t6"}                              # every day, that hour only
+    p, n = sensor.make_sample(repo, 20, 30, now, hours=sensor.parse_hours("22:00-06:00"), **kw)
+    assert _uids(p) == {"t4", "t5"}                                          # night shift across midnight
+    p, n = sensor.make_sample(repo, 20, 30, now, start=sensor.parse_when("2026-10-09"),
+                              hours=sensor.parse_hours("14:00-15:00"), **kw)
+    assert _uids(p) == {"t3", "t6"}
+    repo.dispose()
+    assert sensor.run(["--sample", "4", "--from", "2026-10-08", "--to", "2026-10-08", "--time", "14:00-15:00"],
+                      settings, base=tmp_path, now=now) == 0
+    assert sensor.run(["--sample", "4", "--from", "2026-10-09", "--to", "2026-10-08"], settings, base=tmp_path,
+                      now=now) == 2
+    assert sensor.run(["--sample", "4", "--time", "2pm"], settings, base=tmp_path, now=now) == 2

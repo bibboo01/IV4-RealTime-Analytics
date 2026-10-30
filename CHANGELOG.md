@@ -4,6 +4,9 @@ Version number = `VERSION` file. Show it with `run version`; it also appears in 
 `run status`, the Google Sheets Status tab and `logs/health.json`.
 Rule: x.y.z - z = bug fix, y = new feature (data and settings stay compatible), x = needs manual steps.
 
+## 1.19.0 - 2026-10-30
+- `run sensor --sample N` can pick pieces from a chosen period: `--from 2026-10-08 --to 2026-10-14` (dates included), `--from "2026-10-08 14:00" --to "2026-10-08 15:00"` (date + time), and `--time 14:00-15:00` for that time of day on every day (`22:00-06:00` crosses midnight). They can be combined, e.g. one shift over a week.
+
 ## 1.18.4 - 2026-10-14
 - `run sensor --clear-labels` forgets every imported answer, so old pre-filled (sensor-checks-itself) labels stop inflating Accuracy; then import only the files a person really checked with `--labels`.
 
