@@ -4,6 +4,9 @@ Version number = `VERSION` file. Show it with `run version`; it also appears in 
 `run status`, the Google Sheets Status tab and `logs/health.json`.
 Rule: x.y.z - z = bug fix, y = new feature (data and settings stay compatible), x = needs manual steps.
 
+## 1.20.0 - 2026-10-31
+- `run labeltool`: system labels, person labels, then TP/TN/FP/FN, in a local web page (no database needed). "Create label file" picks N images at random (half sensor-OK, half sensor-NG) from chosen days/hours of the image folder (`D:\image-data-keyence` or the archive), reads the system's answer from each IV4 .txt (Total Status + every tool) and writes `label_sample_<time>.xlsx` with the same columns as `run sensor --sample`. A person then looks at each image and presses OK/NG (keys 1/2); each answer is saved into the file at once, with the system's answer hidden unless ticked. The numbers: confusion matrix (NG = positive), Accuracy, Precision, Recall, F1, False reject, Missed defect with 95 % ranges (same formulas as `run sensor --labels`), the estimate on all pieces from the real OK/NG totals, by day and by file, FP/FN rows with their images, Excel summary download. Old filled label_sample files open too; any image can be found by file name. `--text` prints the numbers only; `app\labeltool.py` also runs on its own (`python labeltool.py`).
+
 ## 1.19.0 - 2026-10-30
 - `run sensor --sample N` can pick pieces from a chosen period: `--from 2026-10-08 --to 2026-10-14` (dates included), `--from "2026-10-08 14:00" --to "2026-10-08 15:00"` (date + time), and `--time 14:00-15:00` for that time of day on every day (`22:00-06:00` crosses midnight). They can be combined, e.g. one shift over a week.
 

@@ -29,6 +29,7 @@ IV4 Data Agent - one command for everything.
     run gdrive-logout       forget the Google account
     run images [--day D|--all]  put images directly in their archive hour folders (for pieces archived earlier)
     run sensor              sensor parameters, per-tool metrics and accuracy (--sample / --labels / --set)
+    run labeltool [file.xlsx]   accuracy from filled label_sample files + find/show images by name (in the browser)
     run mail [test]         email alerts: settings, and send a test mail
     run sheets              publish the Google Sheets dashboard once and print its link
     run backup              online database backup
@@ -454,6 +455,16 @@ def cmd_images(args, s: Settings) -> int:
     return gallery.run(args, s)
 
 
+def cmd_labeltool(args, s: Settings) -> int:
+    from app import labeltool
+    from app.report_xlsx import ensure_openpyxl
+    err = ensure_openpyxl()
+    if err:
+        print(f"Could not install openpyxl: {err}")
+        return 1
+    return labeltool.run(args, s)
+
+
 def cmd_sensor(args, s: Settings) -> int:
     from app import sensor
     return sensor.run(args, s)
@@ -579,6 +590,7 @@ COMMANDS = {
     "quality": cmd_quality,
     "mail": cmd_mail,
     "sensor": cmd_sensor,
+    "labeltool": cmd_labeltool,
     "images": cmd_images,
     "export-table": cmd_export_table,
     "report": cmd_report,
